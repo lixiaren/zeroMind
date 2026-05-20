@@ -68,5 +68,3 @@ python train\checker_train.py --continue-last --profile balanced --game-batches 
 
 Model weights (`*.model`), training buffers (`*.pkl`), and training state files
 are intentionally ignored by Git because they are large generated artifacts.
-If trained models are needed for a demo, publish them separately through GitHub
-Releases or Git LFS.
