@@ -1,0 +1,1813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAT405 AI Game System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+
+  <style>
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.5s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    body {
+      background: radial-gradient(circle at top left, #1e1b4b, #0f172a);
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    .radial-gradient-black { background: radial-gradient(circle at 30% 30%, #666, #000); }
+    .radial-gradient-white { background: radial-gradient(circle at 30% 30%, #fff, #ccc); }
+
+    @media (max-width: 767px) {
+      body {
+        overflow: auto;
+        min-height: 100svh;
+      }
+
+      #app {
+        height: auto;
+        min-height: 100svh;
+        overflow-x: hidden;
+      }
+
+      header {
+        padding: 0.75rem 1rem;
+        gap: 0.75rem;
+        align-items: flex-start;
+      }
+
+      header h1 {
+        font-size: 1rem;
+        line-height: 1.25rem;
+      }
+
+      header > div:last-child {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.5rem;
+      }
+
+      main {
+        align-items: stretch;
+        justify-content: flex-start;
+        padding: 0.5rem;
+        overflow: visible;
+      }
+
+      .game-shell {
+        height: auto;
+        min-height: calc(100svh - 5.5rem);
+        gap: 0.75rem;
+        max-width: 100%;
+      }
+
+      .game-side-panel {
+        flex: 0 0 auto;
+        padding: 0.75rem;
+        gap: 0.75rem;
+      }
+
+      .game-side-panel .space-y-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+
+      .game-board-panel {
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 0.5rem;
+        overflow: visible;
+      }
+
+      .board-square {
+        width: min(100%, calc(100svw - 1.5rem));
+        max-width: none;
+        min-width: 280px;
+      }
+
+      .gomoku-board-square {
+        padding: 0.5rem;
+      }
+
+      .checkers-board-square {
+        border-width: 0.35rem;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .board-square {
+        min-width: 0;
+        width: min(100%, calc(100svw - 1rem));
+      }
+    }
+  </style>
+</head>
+
+<body class="antialiased overflow-hidden">
+<div id="app" class="h-screen w-full flex flex-col relative">
+
+  <div class="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
+    <div class="absolute top-10 left-1/4 w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+    <div class="absolute top-10 right-1/4 w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+  </div>
+
+  <header class="w-full p-6 flex justify-between items-center z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+        <i class="fas fa-brain text-white"></i>
+      </div>
+      <h1 class="text-xl font-bold tracking-wider">ZeroMind <span class="text-blue-400 text-sm">AI System</span></h1>
+    </div>
+    <div v-if="user" class="flex items-center gap-4">
+      <span class="text-gray-300 text-sm">Welcome, {{ user.name }}</span>
+      <button @click="openFriendsPanel"
+        class="relative text-xs border border-gray-600 px-3 py-1 rounded hover:bg-white/10 transition">
+        Friends
+        <span v-if="friendRequests.length"
+              class="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
+          {{ friendRequests.length }}
+        </span>
+      </button>
+      <button @click="openProfile()"
+        class="text-xs border border-gray-600 px-3 py-1 rounded hover:bg-white/10 transition">Profile</button>
+      <button @click="logout" class="text-xs border border-gray-600 px-3 py-1 rounded hover:bg-white/10 transition">Logout</button>
+    </div>
+  </header>
+
+  <main class="flex-1 flex items-center justify-center p-4 relative">
+    <transition name="fade" mode="out-in">
+
+      <!-- LOGIN / REGISTER -->
+      <div v-if="currentStep === 'login'" key="login" class="glass-panel p-10 rounded-2xl shadow-2xl w-full max-w-md text-center">
+        <h2 class="text-3xl font-bold mb-2">System Access</h2>
+        <p class="text-gray-400 mb-6 text-sm">Intelligent Board Game AI</p>
+
+        <div class="flex bg-slate-800/40 rounded-xl p-1 mb-6 border border-slate-700">
+          <button class="flex-1 py-2 rounded-lg text-sm transition"
+                  :class="authTab === 'login' ? 'bg-blue-600/60 text-white' : 'text-gray-300 hover:bg-white/5'"
+                  @click="authTab='login'">login</button>
+          <button class="flex-1 py-2 rounded-lg text-sm transition"
+                  :class="authTab === 'register' ? 'bg-purple-600/60 text-white' : 'text-gray-300 hover:bg-white/5'"
+                  @click="authTab='register'">register</button>
+        </div>
+
+        <div v-if="authTab==='login'" class="space-y-4">
+          <input type="text" v-model="loginForm.username" placeholder="Username"
+                 class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 transition text-white">
+          <input type="password" v-model="loginForm.password" placeholder="Password"
+                 class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 transition text-white">
+          <button @click="handleLogin"
+                  class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 rounded-lg shadow-lg transform hover:scale-[1.02] transition-all">
+            Sign In
+          </button>
+        </div>
+
+        <div v-else class="space-y-4">
+          <input type="text" v-model="registerForm.username" placeholder="Username (unique)"
+                 class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 transition text-white">
+          <input type="password" v-model="registerForm.password" placeholder="Password (>= 6 chars)"
+                 class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 transition text-white">
+          <input type="password" v-model="registerForm.password2" placeholder="Confirm Password"
+                 class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 transition text-white">
+          <button @click="handleRegister"
+                  class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold py-3 rounded-lg shadow-lg transform hover:scale-[1.02] transition-all">
+            Create Account
+          </button>
+        </div>
+
+        <p v-if="authMsg" class="mt-4 text-sm" :class="authMsgType==='error' ? 'text-red-300' : 'text-green-300'">
+          {{ authMsg }}
+        </p>
+
+        <p class="mt-6 text-xs text-gray-500">Authorized Personnel Only - USM CS</p>
+      </div>
+
+      <!-- LOBBY -->
+      <div v-else-if="currentStep === 'lobby'" key="lobby" class="w-full max-w-4xl text-center">
+        <h2 class="text-4xl font-bold mb-12 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+          Select Game
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div @click="selectGame('gomoku')"
+               class="glass-panel p-8 rounded-2xl hover:bg-slate-700/50 cursor-pointer transition-all duration-300 transform hover:-translate-y-2 group border-t-4 border-blue-500">
+            <div class="w-20 h-20 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition">
+              <i class="fas fa-circle text-3xl text-white"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">Gomoku</h3>
+            <p class="text-gray-400 text-sm">5 pieces in a row</p>
+            <div class="mt-6 inline-block px-4 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs">Standard 15x15</div>
+          </div>
+
+          <div @click="selectGame('checkers')"
+               class="glass-panel p-8 rounded-2xl hover:bg-slate-700/50 cursor-pointer transition-all duration-300 transform hover:-translate-y-2 group border-t-4 border-purple-500">
+            <div class="w-20 h-20 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition">
+              <i class="fas fa-chess-board text-3xl text-purple-400"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">Checkers</h3>
+            <p class="text-gray-400 text-sm">English/American Rules</p>
+            <div class="mt-6 inline-block px-4 py-1 rounded-full bg-purple-500/20 text-purple-300 text-xs">8x8 (Forced Captures)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GAME -->
+      <div v-else-if="currentStep === 'game'" key="game" class="game-shell flex flex-col md:flex-row gap-6 w-full max-w-6xl h-[85vh]">
+
+        <!-- PvE Side/Order Select (Gomoku: black/white, Checkers: first/second) -->
+        <div v-if="showSideSelect" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+          <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl">
+            <div class="mb-6">
+              <h3 class="text-2xl font-bold mb-4">AI Difficulty</h3>
+              <div class="grid grid-cols-3 gap-2">
+                <button v-for="d in aiDifficultyOptions" :key="d.value"
+                        @click="selectedDifficulty = d.value"
+                        :class="[
+                          'py-3 px-2 rounded-lg border text-sm font-bold transition',
+                          selectedDifficulty === d.value
+                            ? 'bg-blue-600 border-blue-400 text-white'
+                            : 'bg-slate-700/40 border-slate-600 text-gray-300 hover:bg-slate-700'
+                        ]">
+                  {{ d.label }}
+                </button>
+              </div>
+            </div>
+            <template v-if="currentGame==='gomoku'">
+              <h3 class="text-2xl font-bold mb-2">Choose Your Side</h3>
+              <p class="text-gray-400 mb-6 text-sm">Black moves first</p>
+              <div class="grid gap-4">
+                <button @click="choosePveRole(1)"
+                        class="p-4 bg-slate-700/40 border border-slate-600 hover:bg-slate-700 rounded-xl flex items-center justify-between transition">
+                  <span class="font-bold">Play Black (Player 1)</span>
+                  <span class="w-5 h-5 rounded-full bg-black border border-gray-500"></span>
+                </button>
+                <button @click="choosePveRole(2)"
+                        class="p-4 bg-slate-700/40 border border-slate-600 hover:bg-slate-700 rounded-xl flex items-center justify-between transition">
+                  <span class="font-bold">Play White (Player 2)</span>
+                  <span class="w-5 h-5 rounded-full bg-white border border-gray-500"></span>
+                </button>
+              </div>
+            </template>
+
+            <template v-else>
+              <h3 class="text-2xl font-bold mb-2">Choose Turn Order</h3>
+              <p class="text-gray-400 mb-6 text-sm">Player 1 moves first</p>
+              <div class="grid gap-4">
+                <button @click="choosePveRole(1)"
+                        class="p-4 bg-slate-700/40 border border-slate-600 hover:bg-slate-700 rounded-xl flex items-center justify-between transition">
+                  <span class="font-bold">Go First (Player 1)</span>
+                  <span class="text-xs text-gray-300">Black</span>
+                </button>
+                <button @click="choosePveRole(2)"
+                        class="p-4 bg-slate-700/40 border border-slate-600 hover:bg-slate-700 rounded-xl flex items-center justify-between transition">
+                  <span class="font-bold">Go Second (Player 2)</span>
+                  <span class="text-xs text-gray-300">Red</span>
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Online PvP: input opponent username -->
+        <div v-if="showNetPrompt" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+          <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl">
+            <h3 class="text-2xl font-bold mb-2">Online PvP</h3>
+            <p class="text-gray-400 mb-6 text-sm">Enter opponent username to challenge</p>
+
+            <input v-model="targetUsername" type="text" placeholder="Opponent Username"
+                   class="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-purple-500 transition text-white mb-4">
+
+            <div class="grid gap-3">
+              <button @click="sendChallenge"
+                      class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
+                Challenge
+              </button>
+              <button @click="cancelNetPrompt"
+                      class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-lg transition">
+                Cancel
+              </button>
+            </div>
+
+            <p v-if="netMsg" class="mt-4 text-sm text-gray-300">{{ netMsg }}</p>
+          </div>
+        </div>
+
+        <!-- Game-over modal -->
+        <div v-if="showGameOver" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+          <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl">
+            <h3 class="text-2xl font-bold mb-4">Game Over</h3>
+
+            <div class="text-lg mb-6">
+              <template v-if="gameOverWinner === -1">Draw!</template>
+              <template v-else-if="gameMode === 'pve'">
+                <template v-if="gameOverWinner === myPlayer">You Win</template>
+                <template v-else>You Lose</template>
+              </template>
+              <template v-else>
+                Winner: Player {{ gameOverWinner }}
+              </template>
+            </div>
+
+            <div class="grid gap-3">
+              <button @click="restartGame"
+                      class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
+                Play Again
+              </button>
+              <button @click="backToLobby"
+                      class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-lg transition">
+                Back to Lobby
+              </button>
+            </div>
+          </div>
+        </div>
+
+        
+        <!-- LEFT PANEL -->
+        <div class="game-side-panel w-full md:w-1/4 glass-panel rounded-xl p-6 flex flex-col justify-between">
+          <div>
+            <button @click="backToLobby" class="flex items-center text-gray-400 hover:text-white mb-6 transition">
+              <i class="fas fa-arrow-left mr-2"></i> Back to Main
+            </button>
+
+            <div class="mb-6">
+              <h3 class="text-xl font-bold text-white mb-1">{{ currentGameConfig.name }}</h3>
+              <div class="text-xs text-blue-400 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full animate-pulse" :class="socketConnected ? 'bg-green-500' : 'bg-red-500'"></span>
+                {{ currentModeLabel }} ({{ socketConnected ? 'Connected' : 'Offline' }})
+              </div>
+              <div v-if="myPlayer" class="mt-2 text-xs text-gray-300">
+                You: Player {{ myPlayer }} <span v-if="opponent">vs {{ opponent }}</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800/50 rounded-lg p-4 mb-6">
+              <div class="text-sm text-gray-400 mb-2">Current Turn</div>
+              <div class="flex items-center gap-2 font-bold text-lg">
+                <span class="w-4 h-4 rounded-full border border-gray-500" :class="currentPlayer === 1 ? 'bg-black' : 'bg-white'"></span>
+                Player {{ currentPlayer }}
+                <span v-if="isMyTurn" class="text-xs text-green-300 ml-2">(Your turn)</span>
+              </div>
+            </div>
+
+            <div v-if="currentGame === 'checkers'" class="mt-4 text-xs text-gray-400">
+              <div>Rules: Forced capture, multi-jump, men forward-only, king both ways.</div>
+              <div v-if="ckChainPosDark !== null" class="mt-1 text-yellow-300">
+                Must continue capture (dark index: {{ ckChainPosDark }})
+              </div>
+              <div v-if="selectedFromUi !== -1" class="mt-1 text-gray-300">
+                Selected: {{ selectedFromUi }}
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <button @click="undoMove"
+                    class="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded text-sm transition">
+              Undo (server)
+            </button>
+            <button @click="resign"
+                    class="w-full bg-red-900/50 hover:bg-red-900/80 text-red-200 py-2 rounded text-sm transition">
+              Resign
+            </button>
+          </div>
+        </div>
+
+        <!-- BOARD AREA -->
+        <div class="game-board-panel flex-1 glass-panel rounded-xl flex items-center justify-center p-4 relative overflow-hidden bg-[#eecfa1]/10">
+
+          <!-- MODE SELECT -->
+          <div v-if="showModeSelect" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+            <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl">
+              <h3 class="text-2xl font-bold mb-6">Choose Mode</h3>
+              <div class="grid gap-4">
+                <button @click="setMode('pve')"
+                        class="p-4 bg-blue-600/20 border border-blue-500/50 hover:bg-blue-600 hover:text-white rounded-xl flex items-center gap-4 transition group">
+                  <div class="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white"><i class="fas fa-robot"></i></div>
+                  <div class="text-left">
+                    <div class="font-bold">PvE (Player vs AI)</div>
+                    <div class="text-xs opacity-70 group-hover:opacity-100">Gomoku / Checkers</div>
+                  </div>
+                </button>
+
+                <button @click="setMode('pvp_net')"
+                        class="p-4 bg-purple-600/20 border border-purple-500/50 hover:bg-purple-600 hover:text-white rounded-xl flex items-center gap-4 transition group">
+                  <div class="w-10 h-10 bg-purple-500 rounded-lg flex items-center justify-center text-white"><i class="fas fa-globe"></i></div>
+                  <div class="text-left">
+                    <div class="font-bold">Online PvP</div>
+                    <div class="text-xs opacity-70 group-hover:opacity-100">Challenge by username</div>
+                  </div>
+                </button>
+
+                <button @click="setMode('local')"
+                        class="p-4 bg-slate-600/20 border border-slate-500/50 hover:bg-slate-600 hover:text-white rounded-xl flex items-center gap-4 transition group">
+                        <div class="w-10 h-10 bg-slate-500 rounded-lg flex items-center justify-center text-white">
+                            <i class="fas fa-user-friends"></i>
+                        </div>
+                        <div class="text-left">
+                            <div class="font-bold">Local (Same account)</div>
+                            <div class="text-xs opacity-70 group-hover:opacity-100">Server-authoritative self play</div>
+                        </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- GOMOKU -->
+          <div
+                v-if="currentGame === 'gomoku'"
+            class="board-square gomoku-board-square bg-[#deb887] p-3 md:p-5 rounded shadow-2xl select-none w-full max-w-[65vh] aspect-square"
+                :class="gomokuLocked ? 'pointer-events-none opacity-95' : ''">
+            
+            <div class="relative w-full h-full">
+              <div class="absolute pointer-events-none z-0"
+                   :style="{ top: gomokuBoardInset, left: gomokuBoardInset, right: gomokuBoardInset, bottom: gomokuBoardInset }">
+                <div v-for="n in GOMOKU_SIZE" :key="'h'+n"
+                     class="absolute left-0 right-0 bg-[#333]" style="height: 1px;"
+                     :style="{ top: ((n - 1) * 100 / (GOMOKU_SIZE - 1)) + '%' }"></div>
+                <div v-for="n in GOMOKU_SIZE" :key="'v'+n"
+                     class="absolute top-0 bottom-0 bg-[#333]" style="width: 1px;"
+                     :style="{ left: ((n - 1) * 100 / (GOMOKU_SIZE - 1)) + '%' }"></div>
+              </div>
+
+              <div class="absolute inset-0 grid w-full h-full z-10"
+                   :style="gomokuGridStyle">
+                <div v-for="(cell, index) in gomokuBoard"
+                     :key="index"
+                     @click="clickGomoku(index)"
+                     class="relative w-full h-full flex items-center justify-center cursor-pointer group">
+                  <!-- <div v-if="[48, 56, 112, 168, 176].includes(index)"
+                       class="absolute w-2 h-2 bg-[#333] rounded-full -z-10"></div> -->
+
+                  <div v-if="cell !== 0"
+                       class="w-[85%] h-[85%] rounded-full shadow-xl transform transition-all duration-200 scale-100 z-10"
+                       :class="cell === 1 ? 'bg-slate-900 radial-gradient-black' : 'bg-gray-100 radial-gradient-white'"></div>
+
+                  <div v-if="lastMoveIndex === index"
+                       class="absolute w-2 h-2 bg-red-500 rounded-full z-20 shadow-sm border-[0.5px] border-white/50"></div>
+
+                  <div v-if="cell === 0 && isMyTurn"
+                       class="w-[85%] h-[85%] rounded-full absolute z-10 opacity-0 group-hover:opacity-40 transition-opacity duration-150"
+                       :class="myPlayer === 1 ? 'bg-black' : 'bg-white'"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CHECKERS -->
+          <div v-if="currentGame === 'checkers'" class="board-square checkers-board-square border-8 border-[#5d4037] rounded shadow-2xl w-full max-w-[65vh] aspect-square">
+            <div class="grid grid-cols-8 grid-rows-8 w-full h-full">
+              <div v-for="(cell, uiIndex) in checkersBoard"
+                   :key="uiIndex"
+                   @click="clickCheckers(uiIndex)"
+                   class="w-full h-full flex items-center justify-center relative"
+                   :class="getCheckerCellClass(uiIndex)">
+
+                <div v-if="cell !== 0"
+                     class="relative w-[75%] h-[75%] rounded-full shadow-lg border-4 box-border transform transition cursor-pointer flex items-center justify-center"
+                     :class="[
+                        isCheckerOwner(cell, 1) ? 'bg-slate-800 border-slate-600' : 'bg-red-100 border-red-300',
+                        selectedFromUi === uiIndex ? 'ring-4 ring-yellow-400 ring-opacity-80 scale-110 z-10' : 'hover:scale-105'
+                      ]">
+                  <div class="w-full h-full rounded-full border-2 border-dashed border-opacity-30 border-gray-400"></div>
+
+                  <i v-if="isCheckerKing(cell)"
+                     class="fas fa-crown absolute text-yellow-300 text-sm drop-shadow"
+                     style="text-shadow: 0 1px 2px rgba(0,0,0,0.6);"></i>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </transition>
+  </main>
+
+  <!-- FRIENDS PANEL -->
+  <div v-if="showFriendsPanel" class="absolute inset-0 z-40 bg-slate-950/70 flex justify-end">
+    <div class="w-full max-w-md h-full bg-slate-900 border-l border-slate-700 shadow-2xl p-5 overflow-y-auto">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-xl font-bold">Friends</h3>
+          <p class="text-xs text-gray-400">Social Hub</p>
+        </div>
+        <button @click="showFriendsPanel=false" class="w-8 h-8 rounded border border-slate-600 hover:bg-white/10">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div class="flex gap-2 mb-3">
+        <input v-model="friendSearch" @keyup.enter="searchUser" type="text" placeholder="Search username"
+               class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 text-white">
+        <button @click="searchUser" class="w-10 rounded-lg bg-blue-600 hover:bg-blue-500">
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+      <p v-if="friendMsg" class="text-xs mb-3" :class="friendMsgType==='error' ? 'text-red-300' : 'text-green-300'">
+        {{ friendMsg }}
+      </p>
+
+      <div v-if="friendSearchResult?.ok" class="border border-slate-700 rounded-lg p-3 mb-5 bg-slate-800/60">
+        <div class="flex items-center justify-between">
+          <button @click="openUserCard(friendSearchResult.user.username)" class="text-left">
+            <div class="font-bold">{{ friendSearchResult.user.username }}</div>
+            <div class="text-xs" :class="friendSearchResult.online ? 'text-green-300' : 'text-gray-400'">
+              {{ friendSearchResult.online ? 'Online' : 'Offline' }} · {{ relationLabel(friendSearchResult.relation) }}
+            </div>
+          </button>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button v-if="friendSearchResult.relation === 'none'" @click="sendFriendRequest(friendSearchResult.user.username)"
+                    class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-xs">Add</button>
+            <button v-else-if="friendSearchResult.relation === 'incoming'" @click="replyFriendRequest(friendSearchResult.user.username, true)"
+                    class="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-xs">Accept</button>
+            <button v-if="friendSearchResult.relation === 'friends'" @click="openChat(friendSearchResult.user.username)"
+                    class="px-3 py-1 rounded bg-purple-600 hover:bg-purple-500 text-xs">Chat</button>
+            <button v-if="friendSearchResult.relation === 'friends'" @click="challengeFriend(friendSearchResult.user.username, 'gomoku')"
+                    class="px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-xs">Gomoku</button>
+            <button v-if="friendSearchResult.relation === 'friends'" @click="challengeFriend(friendSearchResult.user.username, 'checkers')"
+                    class="px-3 py-1 rounded bg-indigo-700 hover:bg-indigo-600 text-xs">Checkers</button>
+            <button v-if="friendSearchResult.relation === 'friends'" @click="removeFriend(friendSearchResult.user.username)"
+                    class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs">Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="font-bold">Friend Requests</h4>
+          <span class="text-xs text-gray-400">{{ friendRequests.length }}</span>
+        </div>
+        <div v-if="!friendRequests.length" class="text-sm text-gray-500 border border-slate-800 rounded-lg p-3">
+          No pending requests.
+        </div>
+        <div v-for="req in friendRequests" :key="req.username" class="border border-slate-700 rounded-lg p-3 mb-2 bg-slate-800/50">
+          <div class="flex items-center justify-between gap-3">
+            <button @click="openUserCard(req.username)" class="text-left">
+              <div class="font-semibold">{{ req.username }}</div>
+              <div class="text-xs" :class="req.online ? 'text-green-300' : 'text-gray-400'">
+                {{ req.online ? 'Online' : 'Offline' }}
+              </div>
+            </button>
+            <div class="flex gap-2">
+              <button @click="replyFriendRequest(req.username, true)" class="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-xs">Accept</button>
+              <button @click="replyFriendRequest(req.username, false)" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs">Reject</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="font-bold">Friend List</h4>
+          <span class="text-xs text-gray-400">{{ friends.length }}</span>
+        </div>
+        <div v-if="!friends.length" class="text-sm text-gray-500 border border-slate-800 rounded-lg p-3">
+          Your friend list is empty.
+        </div>
+        <div v-for="f in friends" :key="f.username" class="border border-slate-700 rounded-lg p-3 mb-2 bg-slate-800/50">
+          <div class="flex items-center justify-between gap-3">
+            <button @click="openUserCard(f.username)" class="flex items-center gap-3 text-left min-w-0">
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="f.online ? 'bg-green-400' : 'bg-gray-500'"></span>
+              <span class="min-w-0">
+                <span class="block font-semibold truncate">{{ f.username }}</span>
+                <span class="block text-xs" :class="f.online ? 'text-green-300' : 'text-gray-400'">{{ f.online ? 'Online' : 'Offline' }}</span>
+              </span>
+            </button>
+            <div class="flex gap-2">
+              <button @click="openChat(f.username)" class="w-8 h-8 rounded bg-purple-600 hover:bg-purple-500" title="Chat">
+                <i class="fas fa-comment"></i>
+              </button>
+              <button @click="openUserCard(f.username)" class="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600" title="Profile">
+                <i class="fas fa-user"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="outgoingRequests.length">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="font-bold">Sent Requests</h4>
+          <span class="text-xs text-gray-400">{{ outgoingRequests.length }}</span>
+        </div>
+        <div v-for="req in outgoingRequests" :key="req.username" class="text-sm border border-slate-800 rounded-lg p-3 mb-2 text-gray-300">
+          {{ req.username }} · Waiting for response
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- USER PROFILE MODAL -->
+  <div v-if="showProfile" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+    <div class="bg-slate-800 p-6 rounded-xl max-w-3xl w-full border border-slate-700 shadow-2xl max-h-[88vh] overflow-y-auto">
+      <div class="flex justify-between items-start gap-4 mb-5">
+        <div>
+          <div class="text-2xl font-bold">{{ profileData?.user?.username || 'Player Profile' }}</div>
+          <div v-if="profileData?.ok" class="text-xs mt-1" :class="profileData.online ? 'text-green-300' : 'text-gray-400'">
+            {{ profileData.online ? 'Online' : 'Offline' }} · {{ relationLabel(profileData.relation) }}
+          </div>
+        </div>
+        <button @click="showProfile=false" class="w-8 h-8 rounded border border-slate-600 hover:bg-white/10">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div v-if="profileData?.ok" class="space-y-5">
+        <div v-if="profileData.user.username !== user?.name" class="flex flex-wrap gap-2">
+          <button v-if="profileData.relation === 'none'" @click="sendFriendRequest(profileData.user.username)"
+                  class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-sm">Add Friend</button>
+          <button v-if="profileData.relation === 'incoming'" @click="replyFriendRequest(profileData.user.username, true)"
+                  class="px-3 py-2 rounded bg-green-600 hover:bg-green-500 text-sm">Accept Request</button>
+          <button v-if="profileData.relation === 'friends'" @click="openChat(profileData.user.username)"
+                  class="px-3 py-2 rounded bg-purple-600 hover:bg-purple-500 text-sm">Chat</button>
+          <button v-if="profileData.relation === 'friends'" @click="challengeFriend(profileData.user.username, 'gomoku')"
+                  class="px-3 py-2 rounded bg-blue-700 hover:bg-blue-600 text-sm">Challenge Gomoku</button>
+          <button v-if="profileData.relation === 'friends'" @click="challengeFriend(profileData.user.username, 'checkers')"
+                  class="px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm">Challenge Checkers</button>
+          <button v-if="profileData.relation === 'friends'" @click="removeFriend(profileData.user.username)"
+                  class="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600 text-sm">Remove Friend</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-slate-900/40 rounded-lg p-4 border border-slate-700">
+            <div class="font-bold mb-2">Gomoku</div>
+            <div class="text-sm text-gray-200">
+              PvP: {{ profileData.stats.gomoku.pvp.win }}W {{ profileData.stats.gomoku.pvp.lose }}L {{ profileData.stats.gomoku.pvp.draw }}D
+              <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.gomoku.pvp }}%</span>
+            </div>
+            <div class="text-sm text-gray-200 mt-1">
+              PvE: {{ profileData.stats.gomoku.pve.win }}W {{ profileData.stats.gomoku.pve.lose }}L {{ profileData.stats.gomoku.pve.draw }}D
+              <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.gomoku.pve }}%</span>
+            </div>
+          </div>
+
+          <div class="bg-slate-900/40 rounded-lg p-4 border border-slate-700">
+            <div class="font-bold mb-2">Checkers</div>
+            <div class="text-sm text-gray-200">
+              PvP: {{ profileData.stats.checkers.pvp.win }}W {{ profileData.stats.checkers.pvp.lose }}L {{ profileData.stats.checkers.pvp.draw }}D
+              <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.checkers.pvp }}%</span>
+            </div>
+            <div class="text-sm text-gray-200 mt-1">
+              PvE: {{ profileData.stats.checkers.pve.win }}W {{ profileData.stats.checkers.pve.lose }}L {{ profileData.stats.checkers.pve.draw }}D
+              <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.checkers.pve }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900/40 rounded-lg p-4 border border-slate-700">
+          <div class="font-bold mb-2">Game History</div>
+          <div class="max-h-[36vh] overflow-auto">
+            <table class="w-full text-xs text-gray-200">
+              <thead class="text-gray-400">
+                <tr>
+                  <th class="text-left py-2">Time</th>
+                  <th class="text-left py-2">Game</th>
+                  <th class="text-left py-2">Mode</th>
+                  <th class="text-left py-2">Result</th>
+                  <th class="text-left py-2">Opponent</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in (profileData.matches || []).slice(0, 20)" :key="m.ts + m.matchId"
+                    class="border-t border-slate-700/60">
+                  <td class="py-2">{{ formatTs(m.ts) }}</td>
+                  <td class="py-2">{{ m.game }}</td>
+                  <td class="py-2">{{ m.mode }}</td>
+                  <td class="py-2"
+                      :class="m.result==='win' ? 'text-green-300' : (m.result==='lose' ? 'text-red-300' : 'text-yellow-200')">
+                    {{ m.result }}
+                  </td>
+                  <td class="py-2">{{ m.opponent }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="text-sm text-red-300">
+        Failed to load profile.
+      </div>
+    </div>
+  </div>
+
+  <!-- CHALLENGE INVITE MODAL -->
+  <div v-if="incomingChallenge" class="absolute inset-0 z-[60] bg-slate-950/75 flex items-center justify-center p-4">
+    <div class="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-6 w-full max-w-md text-center">
+      <div class="w-12 h-12 mx-auto rounded-full bg-blue-600/20 flex items-center justify-center mb-4">
+        <i class="fas fa-gamepad text-blue-300"></i>
+      </div>
+      <h3 class="text-xl font-bold mb-2">Match Invitation</h3>
+      <p class="text-gray-300 mb-6">
+        {{ incomingChallenge.from }} invited you to play {{ gameLabel(incomingChallenge.game) }}.
+      </p>
+      <div class="grid grid-cols-2 gap-3">
+        <button @click="replyChallenge(true)"
+                class="py-3 rounded-lg bg-green-600 hover:bg-green-500 font-bold">
+          Accept
+        </button>
+        <button @click="replyChallenge(false)"
+                class="py-3 rounded-lg bg-slate-700 hover:bg-slate-600">
+          Decline
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="challengeStatus" class="fixed top-20 right-6 z-[70] max-w-sm bg-slate-900 border border-slate-700 rounded-lg shadow-xl px-4 py-3 text-sm">
+    <div class="flex items-start gap-3">
+      <i class="fas fa-bell text-blue-300 mt-0.5"></i>
+      <div class="flex-1">{{ challengeStatus }}</div>
+      <button @click="challengeStatus=''" class="text-gray-400 hover:text-white">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- CHAT WINDOW -->
+  <div v-if="chatOpen" class="fixed right-5 bottom-5 z-50 w-[360px] max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+    <div class="px-4 py-3 bg-slate-800 flex items-center justify-between">
+      <div>
+        <div class="font-bold">{{ chatPeer }}</div>
+        <div class="text-xs text-gray-400">Direct Message</div>
+      </div>
+      <button @click="chatOpen=false" class="w-7 h-7 rounded hover:bg-white/10">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div ref="chatLogEl" class="h-72 overflow-y-auto p-3 space-y-2 bg-slate-950/50">
+      <div v-if="!chatMessages.length" class="text-sm text-gray-500 text-center mt-20">No messages yet.</div>
+      <div v-for="(msg, idx) in chatMessages" :key="idx" class="flex" :class="msg.from === user?.name ? 'justify-end' : 'justify-start'">
+        <div class="max-w-[78%] rounded-lg px-3 py-2 text-sm"
+             :class="msg.from === user?.name ? 'bg-blue-600 text-white' : 'bg-slate-700 text-gray-100'">
+          <div class="whitespace-pre-wrap break-words">{{ msg.text }}</div>
+          <div class="text-[10px] opacity-70 mt-1">{{ formatTs(msg.created_at) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="p-3 bg-slate-900 flex gap-2">
+      <input v-model="chatText" @keyup.enter="sendChat" type="text" placeholder="Message"
+             class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500">
+      <button @click="sendChat" class="w-10 rounded-lg bg-purple-600 hover:bg-purple-500">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+    </div>
+  </div>
+        <!-- PROFILE MODAL (global) -->
+        <div v-if="false && showProfile" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+        <div class="bg-slate-800 p-6 rounded-2xl max-w-3xl w-full border border-slate-700 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+            <div>
+                <div class="text-lg font-bold">profile</div>
+                <div class="text-xs text-gray-400">User: {{ profileData?.user?.username }}</div>
+            </div>
+            <button @click="showProfile=false" class="text-gray-300 hover:text-white">X</button>
+            </div>
+
+            <div v-if="profileData?.ok" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="bg-slate-900/40 rounded-xl p-4 border border-slate-700">
+                <div class="font-bold mb-2">Gomoku</div>
+                <div class="text-sm text-gray-200">
+                PvP：{{ profileData.stats.gomoku.pvp.win }}W {{ profileData.stats.gomoku.pvp.lose }}L {{ profileData.stats.gomoku.pvp.draw }}D
+                <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.gomoku.pvp }}%</span>
+                </div>
+                <div class="text-sm text-gray-200 mt-1">
+                PvE：{{ profileData.stats.gomoku.pve.win }}W {{ profileData.stats.gomoku.pve.lose }}L {{ profileData.stats.gomoku.pve.draw }}D
+                <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.gomoku.pve }}%</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900/40 rounded-xl p-4 border border-slate-700">
+                <div class="font-bold mb-2">Checkers</div>
+                <div class="text-sm text-gray-200">
+                PvP：{{ profileData.stats.checkers.pvp.win }}W {{ profileData.stats.checkers.pvp.lose }}L {{ profileData.stats.checkers.pvp.draw }}D
+                <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.checkers.pvp }}%</span>
+                </div>
+                <div class="text-sm text-gray-200 mt-1">
+                PvE：{{ profileData.stats.checkers.pve.win }}W {{ profileData.stats.checkers.pve.lose }}L {{ profileData.stats.checkers.pve.draw }}D
+                <span class="text-xs text-gray-400 ml-2">Winrate {{ profileData.winrate.checkers.pve }}%</span>
+                </div>
+            </div>
+            </div>
+
+            <div v-if="profileData?.ok" class="bg-slate-900/40 rounded-xl p-4 border border-slate-700">
+            <div class="font-bold mb-2">Game history</div>
+            <div class="max-h-[45vh] overflow-auto">
+                <table class="w-full text-xs text-gray-200">
+                <thead class="text-gray-400">
+                    <tr>
+                    <th class="text-left py-2">time</th>
+                    <th class="text-left py-2">Game</th>
+                    <th class="text-left py-2">Mode</th>
+                    <th class="text-left py-2">Result</th>
+                    <th class="text-left py-2">Opponent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="m in (profileData.matches || []).slice(0, 20)" :key="m.ts + m.matchId"
+                        class="border-t border-slate-700/60">
+                    <td class="py-2">{{ formatTs(m.ts) }}</td>
+                    <td class="py-2">{{ m.game }}</td>
+                    <td class="py-2">{{ m.mode }}</td>
+                    <td class="py-2"
+                        :class="m.result==='win' ? 'text-green-300' : (m.result==='lose' ? 'text-red-300' : 'text-yellow-200')">
+                        {{ m.result }}
+                    </td>
+                    <td class="py-2">{{ m.opponent }}</td>
+                    </tr>
+                </tbody>
+                </table>
+            </div>
+            </div>
+
+            <div v-else class="text-sm text-red-300">
+            Failed to load profile: {{ profileData }}
+            </div>
+
+        </div>
+        </div>
+</div>
+
+<script>
+  const { createApp, ref, computed, reactive, onUnmounted } = Vue;
+
+  createApp({
+    setup() {
+      const DEFAULT_SERVER_URL = 'http://127.0.0.1:9527';
+      const SERVER_URL = window.location.protocol === 'file:' ? DEFAULT_SERVER_URL : window.location.origin;
+        const gomokuLocked = ref(false);
+        const pendingEngineMove = ref(null);
+        const yourPlayer = ref(null);
+      // ========= Common =========
+      const currentStep = ref('login');
+      const currentGame = ref(null);   // 'gomoku'or 'checkers'
+      const gameMode = ref(null);      // 'pve' 'pvp_net' 'pvp_local'
+      const showModeSelect = ref(false);
+
+      const user = ref(null);
+
+      // ========= Socket =========
+      const socket = ref(null);
+      const socketConnected = ref(false);
+
+      const currentMatchId = ref(null);
+      const myPlayer = ref(null);      // 1 or 2
+      const opponent = ref('');
+
+      // ========= Auth =========
+      const token = ref(sessionStorage.getItem("token") || "");
+      const authTab = ref('login');
+      const loginForm = reactive({ username: '', password: '' });
+      const registerForm = reactive({ username: '', password: '', password2: '' });
+      const authMsg = ref('');
+      const authMsgType = ref(''); // 'error'or'ok'
+      const authRequestPending = ref(false);
+
+      const setAuthMsg = (msg, type) => {
+        authMsg.value = msg || '';
+        authMsgType.value = type || '';
+      };
+
+      // ========= Game over =========
+      const showGameOver = ref(false);
+      const gameOverWinner = ref(null);
+
+
+      const showProfile = ref(false);
+      const profileData = ref(null);
+      const showFriendsPanel = ref(false);
+      const friends = ref([]);
+      const friendRequests = ref([]);
+      const outgoingRequests = ref([]);
+      const friendSearch = ref('');
+      const friendSearchResult = ref(null);
+      const friendMsg = ref('');
+      const friendMsgType = ref('');
+      const chatOpen = ref(false);
+      const chatPeer = ref('');
+      const chatMessages = ref([]);
+      const chatText = ref('');
+      const chatLogEl = ref(null);
+      const incomingChallenge = ref(null);
+      const challengeStatus = ref('');
+
+      
+      // ========= Turn =========
+      const currentPlayer = ref(1);
+      const isMyTurn = computed(() => {
+        if (gameMode.value === 'local') return true;
+        return myPlayer.value != null && currentPlayer.value === myPlayer.value;
+        });
+
+      // ========= PvE selection overlays =========
+      const showSideSelect = ref(false);   // gomoku: side, checkers: order
+      const showNetPrompt = ref(false);
+      const targetUsername = ref('');
+      const netMsg = ref('');
+      const selectedDifficulty = ref('normal');
+      const aiDifficultyOptions = [
+        { value: 'easy', label: 'Easy' },
+        { value: 'normal', label: 'Normal' },
+        { value: 'hard', label: 'Hard' },
+      ];
+
+      // ========= Gomoku (render only) =========
+      const GOMOKU_SIZE = 15;
+      const GOMOKU_CELLS = GOMOKU_SIZE * GOMOKU_SIZE;
+      const gomokuBoardInset = `${100 / (GOMOKU_SIZE * 2)}%`;
+      const gomokuGridStyle = {
+        gridTemplateColumns: `repeat(${GOMOKU_SIZE}, 1fr)`,
+        gridTemplateRows: `repeat(${GOMOKU_SIZE}, 1fr)`,
+      };
+      const gomokuBoard = ref(new Array(GOMOKU_CELLS).fill(0));
+      const lastMoveIndex = ref(-1);
+
+      const uiToEngineIndex15 = (uiIndex) => {
+        const rowTop = Math.floor(uiIndex / GOMOKU_SIZE);
+        const col = uiIndex % GOMOKU_SIZE;
+        const rowBottom = (GOMOKU_SIZE - 1 - rowTop);
+        return rowBottom * GOMOKU_SIZE + col;
+      };
+      const engineToUiIndex15 = (engineIndex) => {
+        const rowBottom = Math.floor(engineIndex / GOMOKU_SIZE);
+        const col = engineIndex % GOMOKU_SIZE;
+        const rowTop = (GOMOKU_SIZE - 1 - rowBottom);
+        return rowTop * GOMOKU_SIZE + col;
+      };
+      
+
+      // ========= Checkers (render only) =========
+      const CK_SIZE = 8;
+      const EMPTY = 0;
+      const P1_MAN = 1, P2_MAN = 2, P1_KING = 3, P2_KING = 4;
+
+      const ckBoard = ref(new Array(64).fill(0)); // engine board from backend
+      const ckChainPos = ref(null);               // engine index or null
+      const selectedFromEngine = ref(null);       // engine index or null
+
+      const ckLastFrom = ref(null);
+      const ckLastTo = ref(null);
+      const ckLegalFrom = ref([]);
+      const ckLegalToMap = ref({});
+      const ckLegalFromSet = computed(() => new Set((ckLegalFrom.value || []).map(Number)));
+
+        const ckLegalToSet = computed(() => {
+        const from = selectedFromEngine.value;
+        if (from == null) return new Set();
+        const m = ckLegalToMap.value || {};
+        const arr = m[String(from)] || [];
+        return new Set(arr.map(Number));
+        });
+
+      const uiToEngineIndex8 = (uiIndex) => {
+        const rTop = Math.floor(uiIndex / CK_SIZE);
+        const cLeft = uiIndex % CK_SIZE;
+        const rBottom = (CK_SIZE - 1 - rTop);
+        const c = (CK_SIZE - 1 - cLeft);
+        return rBottom * CK_SIZE + c;
+      };
+      const engineToUiIndex8 = (engineIndex) => {
+        const rBottom = Math.floor(engineIndex / CK_SIZE);
+        const c = engineIndex % CK_SIZE;
+        const rTop = (CK_SIZE - 1 - rBottom);
+        const cLeft = (CK_SIZE - 1 - c);
+        return rTop * CK_SIZE + cLeft;
+      };
+
+      const checkersBoard = computed(() => {
+        const ui = new Array(64).fill(0);
+        for (let e = 0; e < 64; e++) ui[engineToUiIndex8(e)] = ckBoard.value[e] || 0;
+        return ui;
+      });
+
+      const ownerOf = (v) => (v === P1_MAN || v === P1_KING) ? 1 : (v === P2_MAN || v === P2_KING) ? 2 : 0;
+      const isCheckerKing = (v) => (v === P1_KING || v === P2_KING);
+      const isCheckerOwner = (v, player) => ownerOf(v) === player;
+
+      const selectedFromUi = computed(() => {
+        if (selectedFromEngine.value == null) return -1;
+        return engineToUiIndex8(selectedFromEngine.value);
+      });
+
+      const rcToDark = new Array(64).fill(-1);
+      (() => {
+        let di = 0;
+        for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            if ((r + c) % 2 === 1) rcToDark[r * 8 + c] = di++;
+          }
+        }
+      })();
+      const engineIdxToDark = (engineIdx) => {
+        const r = Math.floor(engineIdx / 8);
+        const c = engineIdx % 8;
+        return rcToDark[r * 8 + c];
+      };
+      const ckChainPosDark = computed(() => {
+        if (ckChainPos.value === null) return null;
+        return engineIdxToDark(ckChainPos.value);
+      });
+
+      const getCheckerCellClass = (uiIndex) => {
+        const row = Math.floor(uiIndex / 8);
+        const col = uiIndex % 8;
+        const base = (row + col) % 2 === 1 ? 'bg-[#795548]' : 'bg-[#eecfa1]';
+
+        const e = uiToEngineIndex8(uiIndex);
+
+        // Only show action hints when the player can act.
+        if (!isMyTurn.value) return base;
+
+        // last move highlight
+        if (ckLastFrom.value === e || ckLastTo.value === e) {
+            return base + ' ring-2 ring-emerald-300 ring-inset';
+        }
+
+        // legal targets for selected piece
+        if (ckLegalToSet.value.has(e)) {
+            return base + ' ring-2 ring-yellow-300 ring-inset';
+        }
+
+        // legal from squares (pieces that can move)
+        if (ckLegalFromSet.value.has(e)) {
+            return base + ' ring-2 ring-sky-300/70 ring-inset';
+        }
+
+        return base;
+        };
+
+      // ========= UI config =========
+      const currentGameConfig = computed(() => {
+        if (currentGame.value === 'gomoku') return { name: 'Gomoku' };
+        if (currentGame.value === 'checkers') return { name: 'Checkers' };
+        return { name: '' };
+      });
+
+      const gameLabel = (game) => {
+        if (game === 'gomoku') return 'Gomoku';
+        if (game === 'checkers') return 'Checkers';
+        return game || 'Unknown Game';
+      };
+
+      const currentModeLabel = computed(() => {
+        const map = { pve:'AI Mode (Server)', pvp_net:'Online PvP', local:'Local (Server)' };
+        const base = map[gameMode.value] || 'Choosing Mode...';
+        if (gameMode.value !== 'pve') return base;
+        const label = aiDifficultyOptions.find(d => d.value === selectedDifficulty.value)?.label || 'Normal';
+        return `${base} - ${label}`;
+      });
+
+      const resetUIState = () => {
+        currentMatchId.value = null;
+        myPlayer.value = null;
+        opponent.value = '';
+        showGameOver.value = false;
+        gameOverWinner.value = null;
+        currentPlayer.value = 1;
+
+        // gomoku lock
+        gomokuLocked.value = false;
+        pendingEngineMove.value = null;
+
+        // gomoku UI
+        gomokuBoard.value = new Array(GOMOKU_CELLS).fill(0);
+        lastMoveIndex.value = -1;
+
+        // checkers UI
+        ckBoard.value = new Array(64).fill(0);
+        ckChainPos.value = null;
+        selectedFromEngine.value = null;
+
+        // overlays
+        showSideSelect.value = false;
+        showNetPrompt.value = false;
+        targetUsername.value = '';
+        netMsg.value = '';
+      };
+
+      const setFriendMsg = (msg, type = 'ok') => {
+        friendMsg.value = msg || '';
+        friendMsgType.value = type || '';
+      };
+
+      const relationLabel = (relation) => ({
+        self: 'You',
+        friends: 'Friend',
+        incoming: 'Request received',
+        outgoing: 'Request sent',
+        none: 'Not friends',
+      }[relation] || 'Not friends');
+
+      const openProfile = (username = null) => {
+        ensureSocket();
+        if (!socket.value || !user.value) return;
+        socket.value.emit("profile_get", { username: username || user.value.name });
+        };
+      const formatTs = (ts) => {
+        try { return new Date(ts).toLocaleString(); }
+        catch (e) { return ts; }
+            };
+
+      const refreshFriends = () => {
+        ensureSocket();
+        if (socket.value && user.value) socket.value.emit('friends_get');
+      };
+
+      const openFriendsPanel = () => {
+        showFriendsPanel.value = true;
+        setFriendMsg('', '');
+        refreshFriends();
+      };
+
+      const openUserCard = (username) => {
+        openProfile(username);
+      };
+
+      const searchUser = () => {
+        ensureSocket();
+        const username = (friendSearch.value || '').trim();
+        if (!username) {
+          friendSearchResult.value = null;
+          return setFriendMsg('Please enter a username.', 'error');
+        }
+        setFriendMsg('', '');
+        socket.value.emit('user_search', { username });
+      };
+
+      const sendFriendRequest = (username) => {
+        ensureSocket();
+        socket.value.emit('friend_request_send', { username });
+      };
+
+      const replyFriendRequest = (username, accept) => {
+        ensureSocket();
+        socket.value.emit('friend_request_reply', { username, accept });
+      };
+
+      const removeFriend = (username) => {
+        ensureSocket();
+        if (!confirm(`Remove ${username} from your friends?`)) return;
+        socket.value.emit('friend_remove', { username });
+      };
+
+      const challengeFriend = (username, game) => {
+        ensureSocket();
+        if (!socket.value || !user.value) return;
+        challengeStatus.value = `Sending ${gameLabel(game)} challenge to ${username}...`;
+        currentGame.value = game;
+        gameMode.value = 'pvp_net';
+        showProfile.value = false;
+        showFriendsPanel.value = false;
+        socket.value.emit('challenge_user', { targetUsername: username, game });
+      };
+
+      const replyChallenge = (accept) => {
+        ensureSocket();
+        const invite = incomingChallenge.value;
+        if (!socket.value || !invite) return;
+        socket.value.emit('challenge_reply', { challengeId: invite.challengeId, accept });
+        if (accept) {
+          currentGame.value = invite.game;
+          gameMode.value = 'pvp_net';
+          currentStep.value = 'game';
+          showModeSelect.value = false;
+          showSideSelect.value = false;
+          showNetPrompt.value = false;
+          challengeStatus.value = `Accepted ${gameLabel(invite.game)} challenge from ${invite.from}.`;
+        } else {
+          challengeStatus.value = `Declined challenge from ${invite.from}.`;
+        }
+        incomingChallenge.value = null;
+      };
+
+      const scrollChatToBottom = () => {
+        setTimeout(() => {
+          const el = chatLogEl.value;
+          if (el) el.scrollTop = el.scrollHeight;
+        }, 0);
+      };
+
+      const openChat = (username) => {
+        ensureSocket();
+        chatPeer.value = username;
+        chatOpen.value = true;
+        chatMessages.value = [];
+        showProfile.value = false;
+        socket.value.emit('chat_open', { username });
+        scrollChatToBottom();
+      };
+
+      const sendChat = () => {
+        ensureSocket();
+        const text = (chatText.value || '').trim();
+        if (!text || !chatPeer.value) return;
+        socket.value.emit('chat_send', { username: chatPeer.value, text });
+        chatText.value = '';
+      };
+      // ========= Socket =========
+      const initSocket = () => {
+        if (socket.value) {
+          try { socket.value.removeAllListeners(); } catch (e) {}
+          try { socket.value.disconnect(); } catch (e) {}
+          socket.value = null;
+        }
+
+        if (typeof io === 'undefined') {
+          setAuthMsg('Socket.IO client not loaded. Refresh the page and check your network.', 'error');
+          return null;
+        }
+
+        const s = io(SERVER_URL, {
+          reconnectionAttempts: 3,
+          auth: { token: sessionStorage.getItem("token") || "" }
+        });
+        socket.value = s;
+
+        s.on('connect', () => { socketConnected.value = true; });
+        s.on('disconnect', () => { socketConnected.value = false; });
+        s.on('connect_error', () => {
+          socketConnected.value = false;
+          authRequestPending.value = false;
+          if (currentStep.value === 'login') {
+            setAuthMsg(`Cannot connect to ${SERVER_URL}. Make sure python service.py is running.`, 'error');
+          }
+        });
+
+        s.on("profile_data", (d) => {
+            profileData.value = d;
+            showProfile.value = true;
+            });
+
+        s.on("profile_error", (e) => {
+            alert(e?.msg || "Failed to load profile.");
+            });
+
+        s.on('friends_state', (data) => {
+          if (!data?.ok) return;
+          friends.value = data.friends || [];
+          friendRequests.value = data.incoming || [];
+          outgoingRequests.value = data.outgoing || [];
+          if (friendSearchResult.value?.ok) {
+            const target = friendSearchResult.value.user.username;
+            const foundFriend = friends.value.find(f => f.username === target);
+            const foundIncoming = friendRequests.value.find(f => f.username === target);
+            const foundOutgoing = outgoingRequests.value.find(f => f.username === target);
+            friendSearchResult.value = {
+              ...friendSearchResult.value,
+              online: foundFriend?.online ?? foundIncoming?.online ?? foundOutgoing?.online ?? friendSearchResult.value.online,
+              relation: foundFriend ? 'friends' : (foundIncoming ? 'incoming' : (foundOutgoing ? 'outgoing' : friendSearchResult.value.relation)),
+            };
+          }
+        });
+
+        s.on('user_search_result', (data) => {
+          friendSearchResult.value = data;
+          setFriendMsg(data?.ok ? '' : (data?.msg || 'User not found.'), data?.ok ? 'ok' : 'error');
+        });
+
+        s.on('friend_error', (e) => setFriendMsg(e?.msg || 'Friend action failed.', 'error'));
+        s.on('friend_request_sent', (d) => {
+          setFriendMsg(`Friend request sent to ${d.to}.`, 'ok');
+          if (friendSearchResult.value?.user?.username === d.to) friendSearchResult.value.relation = 'outgoing';
+          if (profileData.value?.user?.username === d.to) profileData.value.relation = 'outgoing';
+        });
+        s.on('friend_request_new', (d) => {
+          setFriendMsg(`New friend request from ${d.from}.`, 'ok');
+          refreshFriends();
+        });
+        s.on('friend_request_result', (d) => {
+          setFriendMsg(d.accepted ? `Friend request accepted: ${d.username}.` : `Friend request rejected: ${d.username}.`, 'ok');
+          const nextRelation = d.accepted ? 'friends' : 'none';
+          if (friendSearchResult.value?.user?.username === d.username) friendSearchResult.value.relation = nextRelation;
+          if (profileData.value?.user?.username === d.username) profileData.value.relation = nextRelation;
+          refreshFriends();
+        });
+        s.on('friend_removed', (d) => {
+          setFriendMsg(`Removed ${d.username} from friends.`, 'ok');
+          if (friendSearchResult.value?.user?.username === d.username) friendSearchResult.value.relation = 'none';
+          if (profileData.value?.user?.username === d.username) profileData.value.relation = 'none';
+          if (chatPeer.value === d.username) chatOpen.value = false;
+          refreshFriends();
+        });
+        s.on('presence_update', (d) => {
+          friends.value = friends.value.map(f => f.username === d.username ? { ...f, online: d.online } : f);
+        });
+        s.on('chat_history', (d) => {
+          if (d?.peer !== chatPeer.value) return;
+          chatMessages.value = d.messages || [];
+          scrollChatToBottom();
+        });
+        s.on('chat_message', (d) => {
+          if (d?.peer === chatPeer.value) {
+            chatMessages.value.push(d.message);
+            chatOpen.value = true;
+            scrollChatToBottom();
+          } else if (d?.peer) {
+            chatPeer.value = d.peer;
+            chatMessages.value = [d.message];
+            chatOpen.value = true;
+            socket.value.emit('chat_open', { username: d.peer });
+          }
+        });
+        s.on('chat_error', (e) => setFriendMsg(e?.msg || 'Chat failed.', 'error'));
+        s.on('error', (e) => {
+          const msg = e?.msg || 'Server error.';
+          netMsg.value = msg;
+          setFriendMsg(msg, 'error');
+          challengeStatus.value = msg;
+        });
+
+
+
+        // Auth
+        s.on('auth_ok', (data) => {
+          authRequestPending.value = false;
+          user.value = { name: data.user.username };
+          sessionStorage.setItem("token", data.token);
+          token.value = data.token;
+          setAuthMsg('Signed in successfully.', 'ok');
+          currentStep.value = 'lobby';
+          refreshFriends();
+        });
+        s.on('force_logout', (e) => { alert(e?.msg || 'This account signed in somewhere else.'); logout(); });
+        s.on('auth_error', (e) => {
+          authRequestPending.value = false;
+          setAuthMsg(e?.msg || 'Authentication failed', 'error');
+        });
+
+        // Net PvP challenge flow
+        s.on('challenge_request', (data) => {
+          incomingChallenge.value = data;
+          challengeStatus.value = `${data.from} invited you to play ${gameLabel(data.game)}.`;
+        });
+
+        s.on('challenge_sent', (d) => {
+          challengeStatus.value = `${gameLabel(d.game)} challenge sent to ${d.to}. Waiting for response.`;
+          netMsg.value = challengeStatus.value;
+        });
+        s.on('challenge_declined', (d) => {
+          challengeStatus.value = `Challenge declined by ${d.by}.`;
+          netMsg.value = challengeStatus.value;
+        });
+
+        s.on('match_found', (data) => {
+          currentMatchId.value = data.matchId || null;
+          myPlayer.value = data.yourPlayer || null;
+          opponent.value = data.opponent || '';
+          if (data.game) currentGame.value = data.game;
+          if (data.mode) {
+            gameMode.value = data.mode;
+          } else if (data.opponent && data.opponent !== 'Local' && !String(data.opponent).startsWith('AI')) {
+            gameMode.value = 'pvp_net';
+          } else {
+            gameMode.value = gameMode.value || 'pvp_net';
+          }
+          currentStep.value = 'game';
+          showModeSelect.value = false;
+          showSideSelect.value = false;
+          showNetPrompt.value = false;
+          incomingChallenge.value = null;
+          if (gameMode.value === 'pvp_net') {
+            challengeStatus.value = `${gameLabel(currentGame.value)} match started with ${opponent.value}.`;
+            setTimeout(() => {
+              if (challengeStatus.value.includes('match started')) challengeStatus.value = '';
+            }, 2500);
+          }
+        });
+
+        // Authoritative state sync (both games)
+        s.on('sync_state', (data) => {
+          if (!data || !data.game) return;
+
+          if (typeof data.currentPlayer === 'number') currentPlayer.value = data.currentPlayer;
+
+          if (data.game === 'gomoku') {
+            // states: [{index,player}], lastMove engine index
+            gomokuBoard.value = new Array(GOMOKU_CELLS).fill(0);
+            lastMoveIndex.value = (data.lastMove >= 0) ? engineToUiIndex15(data.lastMove) : -1;
+
+            for (const st of (data.states || [])) {
+              const ui = engineToUiIndex15(st.index);
+              gomokuBoard.value[ui] = st.player;
+            }
+            // ---- ack pending move ----
+            if (pendingEngineMove.value != null) {
+            const e = pendingEngineMove.value;
+            const ack = (data.lastMove === e) || (data.states || []).some(s => s.index === e);
+            if (ack) pendingEngineMove.value = null;
+            }
+
+            // ---- unlock rules ----
+            if (gameMode.value === 'local') {
+            // Local mode unlocks once the server confirms the move.
+            gomokuLocked.value = (pendingEngineMove.value != null);
+            } else {
+            // PvE / online PvP: no pending move, and it must be your turn.
+            const turnLock = !(myPlayer.value != null && data.currentPlayer === myPlayer.value) && !showGameOver.value;
+            gomokuLocked.value = (pendingEngineMove.value != null) || turnLock;
+            }
+
+            return;
+          }
+
+          if (data.game === 'checkers') {
+            ckBoard.value = Array.isArray(data.board) ? data.board.slice() : new Array(64).fill(0);
+            ckChainPos.value = (data.chainPos === null || data.chainPos === undefined) ? null : data.chainPos;
+            ckLastFrom.value = (data.lastFrom === null || data.lastFrom === undefined) ? null : data.lastFrom;
+            ckLastTo.value   = (data.lastTo === null || data.lastTo === undefined) ? null : data.lastTo;
+
+            ckLegalFrom.value = Array.isArray(data.legalFrom) ? data.legalFrom : [];
+            ckLegalToMap.value = (data.legalToMap && typeof data.legalToMap === 'object') ? data.legalToMap : {};
+            // During capture chains, keep the forced piece selected.
+            if (ckChainPos.value != null && isMyTurn.value) {
+              selectedFromEngine.value = ckChainPos.value;
+            } else {
+              // Keep the current selection unless it no longer belongs to the player.
+              if (selectedFromEngine.value != null) {
+                const v = ckBoard.value[selectedFromEngine.value] || 0;
+                if (ownerOf(v) !== myPlayer.value) selectedFromEngine.value = null;
+              }
+            }
+          }
+        });
+
+        s.on('invalid_move', (data) => {
+            // Only roll back the active game.
+            if (currentGame.value === 'gomoku') {
+                if (pendingEngineMove.value != null) {
+                const ui = engineToUiIndex15(pendingEngineMove.value);
+
+                // Roll back the optimistic stone.
+                gomokuBoard.value[ui] = 0;
+
+                // Roll back the last-move marker if needed.
+                if (lastMoveIndex.value === ui) lastMoveIndex.value = -1;
+
+                pendingEngineMove.value = null;
+                }
+
+                // Unlock; sync_state will correct turn locking.
+                gomokuLocked.value = false;
+            }
+
+            alert(data?.msg || 'Invalid move');
+            });
+
+        s.on('game_over', (data) => {
+            gomokuLocked.value = false;
+            pendingEngineMove.value = null;
+          gameOverWinner.value = data.winner;
+          showGameOver.value = true;
+        });
+      };
+
+      const ensureSocket = () => {
+        if (!socket.value) initSocket();
+        return !!socket.value;
+      };
+
+      // ========= Auth actions =========
+      const handleLogin = () => {
+        const u = (loginForm.username || '').trim();
+        const p = loginForm.password || '';
+        if (!u) return setAuthMsg('Please enter username.', 'error');
+        if (!p) return setAuthMsg('Please enter password.', 'error');
+        if (!ensureSocket()) return;
+        authRequestPending.value = true;
+        setAuthMsg(`Signing in via ${SERVER_URL}...`, 'ok');
+        socket.value.emit('auth_login', {
+          username: u,
+          password: p
+        });
+        setTimeout(() => {
+          if (authRequestPending.value && currentStep.value === 'login') {
+            authRequestPending.value = false;
+            setAuthMsg('No login response yet. Check the service terminal for errors, then refresh this page.', 'error');
+          }
+        }, 10000);
+      };
+
+      const handleRegister = () => {
+        setAuthMsg('', '');
+
+        const u = (registerForm.username || '').trim();
+        const p1 = registerForm.password || '';
+        const p2 = registerForm.password2 || '';
+
+        if (!u) return setAuthMsg('Please enter username.', 'error');
+        if (p1.length < 6) return setAuthMsg('Password must be at least 6 characters.', 'error');
+        if (p1 !== p2) return setAuthMsg('Passwords do not match.', 'error');
+
+        if (!ensureSocket()) return;
+        authRequestPending.value = true;
+        setAuthMsg(`Creating account via ${SERVER_URL}...`, 'ok');
+        socket.value.emit('auth_register', { username: u, password: p1 });
+        setTimeout(() => {
+          if (authRequestPending.value && currentStep.value === 'login') {
+            authRequestPending.value = false;
+            setAuthMsg('No register response yet. Check the service terminal for errors, then refresh this page.', 'error');
+          }
+        }, 10000);
+      };
+
+      const logout = () => {
+        user.value = null;
+        currentStep.value = 'login';
+
+        authTab.value = 'login';
+        setAuthMsg('', '');
+
+        loginForm.username = '';
+        loginForm.password = '';
+        registerForm.username = '';
+        registerForm.password = '';
+        registerForm.password2 = '';
+        showFriendsPanel.value = false;
+        showProfile.value = false;
+        chatOpen.value = false;
+        friends.value = [];
+        friendRequests.value = [];
+        outgoingRequests.value = [];
+        friendSearchResult.value = null;
+        chatMessages.value = [];
+        incomingChallenge.value = null;
+        challengeStatus.value = '';
+
+        sessionStorage.removeItem("token");
+        token.value = '';
+
+        resetUIState();
+
+        if (socket.value) {
+          try { socket.value.removeAllListeners(); } catch (e) {}
+          try { socket.value.disconnect(); } catch (e) {}
+          socket.value = null;
+        }
+      };
+
+      // ========= Flow =========
+      const selectGame = (type) => {
+        currentGame.value = type;
+        currentStep.value = 'game';
+        showModeSelect.value = true;
+        resetUIState();
+      };
+
+      const setMode = (mode) => {
+        if (mode === 'local') {
+            ensureSocket();
+            gameMode.value = 'local';
+            showModeSelect.value = false;
+            resetUIState();
+
+            if (currentGame.value === 'gomoku') {
+                socket.value.emit('start_game', { game:'gomoku', mode:'local', boardSize:GOMOKU_SIZE, nInRow:5 });
+            } else {
+                socket.value.emit('start_game', { game:'checkers', mode:'local', boardSize:8 });
+            }
+            return;
+            }
+
+        gameMode.value = mode;
+        showModeSelect.value = false;
+
+        if (mode === 'pve') {
+          showSideSelect.value = true;
+          return;
+        }
+
+        if (mode === 'pvp_net') {
+          showNetPrompt.value = true;
+          netMsg.value = '';
+          targetUsername.value = '';
+          return;
+        }
+      };
+
+      // PvE choose (gomoku: humanSide, checkers: humanPlayer)
+      const choosePveRole = (p) => {
+        ensureSocket();
+
+        resetUIState();
+        showSideSelect.value = false;
+
+        if (currentGame.value === 'gomoku') {
+          socket.value.emit('start_game', {
+            game: 'gomoku',
+            mode: 'pve',
+            boardSize: GOMOKU_SIZE,
+            nInRow: 5,
+            humanSide: p,
+            difficulty: selectedDifficulty.value
+          });
+        } else {
+          socket.value.emit('start_game', {
+            game: 'checkers',
+            mode: 'pve',
+            boardSize: 8,
+            humanPlayer: p,
+            difficulty: selectedDifficulty.value
+          });
+        }
+      };
+
+      // Online PvP challenge
+      const sendChallenge = () => {
+        ensureSocket();
+        const t = (targetUsername.value || '').trim();
+        if (!t) {
+          netMsg.value = 'Please input opponent username';
+          return;
+        }
+        netMsg.value = 'Sending...';
+        socket.value.emit('challenge_user', { game: currentGame.value, targetUsername: t });
+      };
+
+      const cancelNetPrompt = () => {
+        showNetPrompt.value = false;
+        targetUsername.value = '';
+        netMsg.value = '';
+        showModeSelect.value = true;
+      };
+
+      // ========= Click handlers (send only) =========
+      const clickGomoku = (uiIndex) => {
+        if (!socket.value || !socketConnected.value) return;
+        if (gameMode.value !== 'pve' && gameMode.value !== 'pvp_net' && gameMode.value !== 'local') return;
+        // Ignore repeated clicks while locked.
+        if (gomokuLocked.value) return;
+
+        // It must be my turn.
+        if (!isMyTurn.value) return;
+
+        // The target must be empty.
+        if (gomokuBoard.value[uiIndex] !== 0) return;
+
+        // Optimistic move display.
+       
+        
+        gomokuLocked.value = true;
+        const eIdx = uiToEngineIndex15(uiIndex);
+        pendingEngineMove.value = eIdx;
+
+        // Draw the local move immediately.
+        gomokuBoard.value[uiIndex] = myPlayer.value;
+        lastMoveIndex.value = uiIndex;
+
+        // Flip the displayed turn immediately; the server will correct it.
+        currentPlayer.value = (myPlayer.value === 1 ? 2 : 1);
+
+        // Send the move to the server.
+        socket.value.emit('make_move', {
+            matchId: currentMatchId.value,
+            game: 'gomoku',
+            index: eIdx
+        });
+        };
+      const clickCheckers = (uiIndex) => {
+        if (!socket.value || !socketConnected.value) return;
+        if (gameMode.value !== 'pve' && gameMode.value !== 'pvp_net' && gameMode.value !== 'local') return;
+        if (!isMyTurn.value) return;
+
+        const e = uiToEngineIndex8(uiIndex);
+        const v = ckBoard.value[e] || 0;
+
+        // Capture chain: source is fixed, so clicking a target sends the move.
+        if (ckChainPos.value != null) {
+          selectedFromEngine.value = ckChainPos.value;
+          if (e === selectedFromEngine.value) return;
+          socket.value.emit('make_move', {
+            matchId: currentMatchId.value,
+            game: 'checkers',
+            from: selectedFromEngine.value,
+            to: e
+          });
+          return;
+        }
+
+        // No source selected: clicking your piece selects it.
+        if (selectedFromEngine.value == null) {
+          if (v !== 0 && ownerOf(v) === myPlayer.value) {
+            selectedFromEngine.value = e;
+          }
+          return;
+        }
+
+        // Source selected: own piece changes selection; other cells are targets.
+        if (v !== 0 && ownerOf(v) === myPlayer.value) {
+          selectedFromEngine.value = e;
+          return;
+        }
+
+        socket.value.emit('make_move', {
+          matchId: currentMatchId.value,
+          game: 'checkers',
+          from: selectedFromEngine.value,
+          to: e
+        });
+        selectedFromEngine.value = null;
+      };
+
+      // ========= Toolbar =========
+      const restartGame = () => {
+        showGameOver.value = false;
+        gameOverWinner.value = null;
+
+        if (gameMode.value === 'pve') {
+          showSideSelect.value = true;
+          return;
+        }
+
+        // For PvP, restart by returning to the lobby.
+        backToLobby();
+      };
+
+      const backToLobby = () => {
+        // The server cleans up the match on leave_match.
+        if (socket.value && socketConnected.value) {
+          socket.value.emit('leave_match', { matchId: currentMatchId.value });
+        }
+
+        resetUIState();
+        currentStep.value = 'lobby';
+      };
+
+      const undoMove = () => {
+        if (socket.value && socketConnected.value) socket.value.emit('request_undo', { matchId: currentMatchId.value });
+      };
+
+      const resign = () => {
+        if (socket.value && socketConnected.value) socket.value.emit('leave_match', { matchId: currentMatchId.value, resign: true });
+        // Return the UI to the lobby first.
+        backToLobby();
+      };
+
+      // Auto connect if token exists
+      if (token.value) initSocket();
+
+      onUnmounted(() => {
+        if (socket.value) {
+          try { socket.value.removeAllListeners(); } catch (e) {}
+          try { socket.value.disconnect(); } catch (e) {}
+        }
+      });
+
+      return {
+        // auth
+        currentStep, user, authTab, loginForm, registerForm, authMsg, authMsgType,
+        handleLogin, handleRegister, logout,
+
+        // flow
+        currentGame, selectGame, showModeSelect, setMode, gameMode,
+        currentGameConfig, currentModeLabel, socketConnected,
+
+        // overlays
+        showSideSelect, choosePveRole, selectedDifficulty, aiDifficultyOptions,
+        showNetPrompt, targetUsername, netMsg, sendChallenge, cancelNetPrompt,
+
+        // game info
+        currentPlayer, myPlayer, opponent, isMyTurn,
+        showGameOver, gameOverWinner, restartGame, backToLobby,
+        undoMove, resign,
+
+        // gomoku
+        GOMOKU_SIZE, gomokuBoardInset, gomokuGridStyle,
+        gomokuBoard, lastMoveIndex, clickGomoku,gomokuLocked,
+
+        // checkers
+        checkersBoard, getCheckerCellClass, clickCheckers,
+        isCheckerKing, isCheckerOwner,
+        ckChainPosDark,
+        selectedFromUi,
+
+        openProfile,
+        showProfile,
+        profileData,formatTs,
+        showFriendsPanel, openFriendsPanel,
+        friends, friendRequests, outgoingRequests,
+        friendSearch, friendSearchResult, friendMsg, friendMsgType,
+        searchUser, sendFriendRequest, replyFriendRequest, removeFriend,
+        openUserCard, relationLabel, challengeFriend,
+        incomingChallenge, challengeStatus, replyChallenge, gameLabel,
+        chatOpen, chatPeer, chatMessages, chatText, chatLogEl,
+        openChat, sendChat,
+      };
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
