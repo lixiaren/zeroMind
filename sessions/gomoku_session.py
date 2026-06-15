@@ -12,7 +12,7 @@ class GomokuSession(BaseSession):
         self.size = int(size)
         self.n_in_row = int(n_in_row)
 
-        # 用你原来的 Board 作为权威规则引擎
+        # 用Board 作为权威规则引擎
         self.board = Board(width=self.size, height=self.size, n_in_row=self.n_in_row)
         self.board.init_board(start_player=0)  # 永远让 player=1 先手
         self.start_player = 0
@@ -21,7 +21,7 @@ class GomokuSession(BaseSession):
         self.p1 = p1
         self.p2 = p2
         self.human_side = int(human_side)  # pve: human is 1 or 2
-        self.ai_agent = ai_agent           # 可注入你自己的 AI（保持原接口）
+        self.ai_agent = ai_agent           
 
     # --------- helpers ----------
     def _board_list(self):
@@ -52,24 +52,24 @@ class GomokuSession(BaseSession):
 
     def make_move(self, idx: int, player: int):
         if self.ended:
-            return {"ok": False, "msg": "对局已结束"}
+            return {"ok": False, "msg": "The game is already over."}
 
         idx = int(idx)
         player = int(player)
 
         if player != self.current_player:
-            return {"ok": False, "msg": "未轮到你"}
+            return {"ok": False, "msg": "It is not your turn."}
 
         if idx not in self.board.availables:
-            return {"ok": False, "msg": "非法落子"}
+            return {"ok": False, "msg": "Invalid move. Please choose an empty intersection."}
 
-        # ✅ 落子
+        # 落子
         self.board.do_move(idx)
 
         
-        self.move_history.append(idx)   # ✅ 关键：不记历史就没法撤销
+        self.move_history.append(idx)   # 关键：不记历史就没法撤销
 
-        # ✅ 通知 AI：对手刚走了 idx（树跟上）
+        # 通知 AI：对手刚走了 idx（树跟上）
         if self.mode == "pve" and self.ai_agent and hasattr(self.ai_agent, "update_with_move"):
             self.ai_agent.update_with_move(idx)
 
@@ -97,7 +97,7 @@ class GomokuSession(BaseSession):
         if self.ai_agent and hasattr(self.ai_agent, "get_action"):
             idx = int(self.ai_agent.get_action(self.board))
             if idx not in self.board.availables:
-                # 兜底：AI 出非法步就拒绝并让它重新选（这里简单兜底成第一个合法步）
+                # AI 出非法步就拒绝并让它重新选（这里简单兜底成第一个合法步）
                 idx = int(self.board.availables[0])
         else:
             # 兜底：没注入模型就随机
@@ -115,7 +115,7 @@ class GomokuSession(BaseSession):
             return {"ok": True}
 
         if len(self.move_history) < steps:
-            return {"ok": False, "msg": "没有可撤销的步"}
+            return {"ok": False, "msg": "There are no moves to undo."}
 
         # 1) 弹出历史
         for _ in range(steps):

@@ -326,7 +326,7 @@ def _me():
 def _need_login():
     me = _me()
     if not me:
-        emit("error", {"msg": "Not signed in."})
+        emit("error", {"msg": "Not signed in.", "code": "not_signed_in"})
         return None
     return me
 
@@ -452,17 +452,40 @@ def _record_result(sess):
         )
 
 
-def _finalize(sess):
+def _finalize(sess, reason=None):
     
     # 广播 game_over + 写库 + 清理
-    socketio.emit(
-        "game_over",
-        {"winner": sess.winner, "matchId": sess.match_id, "game": sess.game},
-        to=sess.room,
-    )
+    payload = {"winner": sess.winner, "matchId": sess.match_id, "game": sess.game}
+    if reason:
+        payload["reason"] = reason
+    socketio.emit("game_over", payload, to=sess.room)
     
     _record_result(sess)
     _cleanup_session(sess)
+
+
+def _finalize_disconnect(sid, username, match_id):
+    if not match_id:
+        return
+
+    sess = SESSIONS.get(match_id)
+    if not sess:
+        mm.clear_match(sid)
+        return
+
+    if sid not in getattr(sess, "sids", []):
+        mm.clear_match(sid)
+        return
+
+    if sess.ended:
+        _cleanup_session(sess)
+        return
+
+    _detach_sid(sess, sid)
+    sess.winner = _resign_winner(sess, username)
+    sess.ended = True
+    display_name = username or "A player"
+    _finalize(sess, reason=f"{display_name} disconnected.")
 
 
 def _ai_play_until_human(sess, max_steps=64):
@@ -540,13 +563,18 @@ def on_connect(auth=None):
             emit("auth_ok", {"token": token, "user": {"username": username}})
             _emit_social_state(username)
             _broadcast_presence(username)
+        else:
+            emit("auth_error", {"msg": "Session expired. Please sign in again.", "expired": True})
 
     emit("server_ready", {"ok": True})
 
 @socketio.on("disconnect")
 def on_disconnect():
     sid = _sid()
-    # 这里只做解绑；是否断线判负看你需求（如果要判负，改这里：找到 match => winner=对手 => _finalize）
+    # Finish any active match before unbinding this socket.
+    username = mm.username_of(sid)
+    match_id = mm.sid_match.get(sid)
+    _finalize_disconnect(sid, username, match_id)
     username = mm.unbind_sid(sid)
     if username:
         _broadcast_presence(username)
@@ -584,6 +612,24 @@ def on_auth_login(data):
     emit("auth_ok", {"token": r["token"], "user": r["user"]})
     _emit_social_state(r["user"]["username"])
     _broadcast_presence(r["user"]["username"])
+
+
+@socketio.on("auth_resume")
+def on_auth_resume(data):
+    token = (data or {}).get("token") or ""
+    username = verify_token(token)
+    if not username:
+        emit("auth_error", {"msg": "Session expired. Please sign in again.", "expired": True})
+        return
+
+    sid = _sid()
+    old_sid = mm.bind(username, sid)
+    if old_sid and old_sid != sid:
+        socketio.emit("force_logout", {"msg": "This account signed in somewhere else."}, to=old_sid)
+
+    emit("auth_ok", {"token": token, "user": {"username": username}})
+    _emit_social_state(username)
+    _broadcast_presence(username)
 
 
 @socketio.on("profile_get")
@@ -1032,6 +1078,37 @@ def on_start_game(data):
     # ✅ 让 start_game 立刻返回，先把棋盘发到前端；AI 放后台跑
     if sess.mode == "pve":
         socketio.start_background_task(_bg_ai_play, sess.match_id)
+
+
+@socketio.on("request_state")
+def on_request_state(data):
+    me = _need_login()
+    if not me:
+        return
+
+    sid = _sid()
+    match_id = _get_match_id(data)
+    if not match_id:
+        emit("error", {"msg": "Missing matchId."})
+        return
+
+    sess = _get_session_or_err(match_id)
+    if not sess:
+        return
+
+    if _your_player(sess, me) is None:
+        emit("error", {"msg": "You are not a player in this match."})
+        return
+
+    try:
+        if sid not in getattr(sess, "sids", []):
+            sess.sids.append(sid)
+        join_room(sess.room, sid=sid)
+        mm.set_in_match(sid, sess.match_id)
+    except Exception as exc:
+        print("[request_state] rejoin failed:", repr(exc))
+
+    emit("sync_state", sess.state_payload())
 
 
 # -------------------------

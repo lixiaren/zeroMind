@@ -6,7 +6,7 @@ from games.checker_game import Board, EMPTY, P1_MAN, P2_MAN, P1_KING, P2_KING
 
 class CheckersSession(BaseSession):
     """
-    后端权威规则引擎：复用你训练用的 checker_game.py
+    后端权威规则引擎：复用训练用的 checker_game.py
 
     前端发：
       make_move: {matchId, game:'checkers', from:0..63, to:0..63}
@@ -43,7 +43,7 @@ class CheckersSession(BaseSession):
         self.ai_agent = ai_agent
 
         self.board = Board(width=8, height=8, max_moves=max_moves, promote_ends_turn=promote_ends_turn)
-        self.board.init_board(start_player=0)  # 永远 P1 先手（与你前端一致）
+        self.board.init_board(start_player=0)  # 永远 P1 先手
 
     # ---------- helpers ----------
     @staticmethod
@@ -85,6 +85,22 @@ class CheckersSession(BaseSession):
     @property
     def current_player(self) -> int:
         return int(self.board.current_player)
+
+    def _invalid_move_message(self, action: int) -> str:
+        legal_actions = list(self.board.availables or [])
+        if getattr(self.board, "_chain_pos", None) is not None:
+            return "You must continue the capture chain with the highlighted piece."
+
+        legal_from = {int(a) // 32 for a in legal_actions}
+        capture_required = any(self._action_to_engine_pair(a)[2] for a in legal_actions)
+        if capture_required:
+            return "Capture is mandatory. Select a highlighted piece and capture target."
+
+        from_dark = int(action) // 32 if action >= 0 else -1
+        if from_dark not in legal_from:
+            return "This piece has no legal move right now. Select a highlighted piece."
+
+        return "Invalid target. Select a highlighted destination square."
 
     # ---------- payload ----------
     def state_payload(self):
@@ -134,18 +150,18 @@ class CheckersSession(BaseSession):
     # ---------- gameplay ----------
     def make_move(self, frm: int, to: int, player: int):
         if self.ended:
-            return {"ok": False, "msg": "对局已结束"}
+            return {"ok": False, "msg": "The game is already over."}
 
         player = int(player)
         if player != self.current_player:
-            return {"ok": False, "msg": "未轮到你"}
+            return {"ok": False, "msg": "It is not your turn."}
 
         action = self._move_engine_to_action(frm, to)
         if action < 0:
-            return {"ok": False, "msg": "非法坐标（只能走深色格）"}
+            return {"ok": False, "msg": "Invalid square. Checkers pieces can only move on dark squares."}
 
         if action not in (self.board.availables or []):
-            return {"ok": False, "msg": "非法走法（强制吃子/连吃中/或目标不合法）"}
+            return {"ok": False, "msg": self._invalid_move_message(action)}
 
         self.board.do_move(int(action))
 

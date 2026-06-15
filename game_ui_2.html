@@ -306,21 +306,29 @@
 
         <!-- Game-over modal -->
         <div v-if="showGameOver" class="absolute inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
-          <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl">
+          <div class="bg-slate-800 p-8 rounded-2xl max-w-lg w-full text-center border border-slate-700 shadow-2xl relative">
+            <button @click="closeGameOver"
+                    class="absolute top-3 right-3 w-8 h-8 rounded-full bg-slate-700 hover:bg-slate-600 text-gray-200 transition"
+                    title="Close and review board">
+              <i class="fas fa-times"></i>
+            </button>
             <h3 class="text-2xl font-bold mb-4">Game Over</h3>
 
             <div class="text-lg mb-6">
-              <template v-if="gameOverWinner === -1">Draw!</template>
-              <template v-else-if="gameMode === 'pve'">
-                <template v-if="gameOverWinner === myPlayer">You Win</template>
-                <template v-else>You Lose</template>
-              </template>
-              <template v-else>
-                Winner: Player {{ gameOverWinner }}
-              </template>
+              {{ gameOverMessage }}
+              <div v-if="gameOverReason" class="text-sm text-amber-200 mt-2">
+                {{ gameOverReason }}
+              </div>
+              <div class="text-sm text-gray-400 mt-2">
+                Close this window to review the final board position.
+              </div>
             </div>
 
             <div class="grid gap-3">
+              <button @click="closeGameOver"
+                      class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-lg transition">
+                Review Final Board
+              </button>
               <button @click="restartGame"
                       class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 rounded-lg shadow-lg transition">
                 Play Again
@@ -348,21 +356,37 @@
                 {{ currentModeLabel }} ({{ socketConnected ? 'Connected' : 'Offline' }})
               </div>
               <div v-if="myPlayer" class="mt-2 text-xs text-gray-300">
-                You: Player {{ myPlayer }} <span v-if="opponent">vs {{ opponent }}</span>
+                {{ matchSummary }}
               </div>
             </div>
 
             <div class="bg-slate-800/50 rounded-lg p-4 mb-6">
-              <div class="text-sm text-gray-400 mb-2">Current Turn</div>
+              <div class="text-sm text-gray-400 mb-2">{{ gameOverWinner === null ? 'Current Turn' : 'Game Result' }}</div>
               <div class="flex items-center gap-2 font-bold text-lg">
-                <span class="w-4 h-4 rounded-full border border-gray-500" :class="currentPlayer === 1 ? 'bg-black' : 'bg-white'"></span>
-                Player {{ currentPlayer }}
-                <span v-if="isMyTurn" class="text-xs text-green-300 ml-2">(Your turn)</span>
+                <template v-if="gameOverWinner === null">
+                  <span class="w-4 h-4 rounded-full border border-gray-500" :class="currentPlayer === 1 ? 'bg-black' : 'bg-white'"></span>
+                  {{ displayLabelForPlayer(currentPlayer) }}
+                  <span v-if="isMyTurn" class="text-xs text-green-300 ml-2">(Your turn)</span>
+                </template>
+                <template v-else>
+                  <span class="text-emerald-300">{{ gameOverMessage }}</span>
+                </template>
               </div>
+              <button v-if="gameOverWinner !== null && !showGameOver"
+                      @click="showGameOver = true"
+                      class="mt-3 w-full bg-slate-700 hover:bg-slate-600 py-2 rounded text-sm transition">
+                View Result Options
+              </button>
             </div>
 
             <div v-if="currentGame === 'checkers'" class="mt-4 text-xs text-gray-400">
               <div>Rules: Forced capture, multi-jump, men forward-only, king both ways.</div>
+              <div v-if="checkerActionMsg" class="mt-2 text-amber-200">
+                {{ checkerActionMsg }}
+              </div>
+              <div v-else-if="ckStatusText" class="mt-2 text-sky-200">
+                {{ ckStatusText }}
+              </div>
               <div v-if="ckChainPosDark !== null" class="mt-1 text-yellow-300">
                 Must continue capture (dark index: {{ ckChainPosDark }})
               </div>
@@ -863,6 +887,7 @@
       // ========= Socket =========
       const socket = ref(null);
       const socketConnected = ref(false);
+      const socketAuthed = ref(false);
 
       const currentMatchId = ref(null);
       const myPlayer = ref(null);      // 1 or 2
@@ -885,6 +910,7 @@
       // ========= Game over =========
       const showGameOver = ref(false);
       const gameOverWinner = ref(null);
+      const gameOverReason = ref('');
 
 
       const showProfile = ref(false);
@@ -912,6 +938,42 @@
         if (gameMode.value === 'local') return true;
         return myPlayer.value != null && currentPlayer.value === myPlayer.value;
         });
+      const playerSideLabel = (player) => {
+        const p = Number(player);
+        if (currentGame.value === 'gomoku') return p === 1 ? 'Black' : 'White';
+        if (currentGame.value === 'checkers') return p === 1 ? 'Black' : 'Red';
+        return `Side ${p}`;
+      };
+      const displayNameForPlayer = (player) => {
+        const p = Number(player);
+        const me = user.value?.name || 'You';
+        if (!p) return '';
+        if (gameMode.value === 'local') return me;
+        if (myPlayer.value != null && p === Number(myPlayer.value)) return me;
+        if (opponent.value) return opponent.value;
+        if (gameMode.value === 'pve') return 'AI';
+        return `Player ${p}`;
+      };
+      const displayLabelForPlayer = (player) => {
+        const name = displayNameForPlayer(player);
+        const side = playerSideLabel(player);
+        return side ? `${name} (${side})` : name;
+      };
+      const matchSummary = computed(() => {
+        if (myPlayer.value == null) return '';
+        const meLabel = displayLabelForPlayer(myPlayer.value);
+        const otherPlayer = Number(myPlayer.value) === 1 ? 2 : 1;
+        const otherLabel = displayLabelForPlayer(otherPlayer);
+        return `${meLabel} vs ${otherLabel}`;
+      });
+      const gameOverMessage = computed(() => {
+        if (gameOverWinner.value === null || gameOverWinner.value === undefined) return '';
+        if (gameOverWinner.value === -1) return 'Draw';
+        if (gameMode.value === 'pve') {
+          return gameOverWinner.value === myPlayer.value ? 'You Win' : 'You Lose';
+        }
+        return `${displayLabelForPlayer(gameOverWinner.value)} Wins`;
+      });
 
       // ========= PvE selection overlays =========
       const showSideSelect = ref(false);   // gomoku: side, checkers: order
@@ -963,6 +1025,9 @@
       const ckLastTo = ref(null);
       const ckLegalFrom = ref([]);
       const ckLegalToMap = ref({});
+      const ckMustCapture = ref(false);
+      const ckInChain = ref(false);
+      const checkerActionMsg = ref('');
       const ckLegalFromSet = computed(() => new Set((ckLegalFrom.value || []).map(Number)));
 
         const ckLegalToSet = computed(() => {
@@ -1001,6 +1066,13 @@
       const selectedFromUi = computed(() => {
         if (selectedFromEngine.value == null) return -1;
         return engineToUiIndex8(selectedFromEngine.value);
+      });
+      const ckStatusText = computed(() => {
+        if (currentGame.value !== 'checkers' || !isMyTurn.value || gameOverWinner.value !== null) return '';
+        if (ckInChain.value) return 'Continue the capture with the highlighted piece.';
+        if (ckMustCapture.value) return 'Capture required. Select a highlighted piece and capture target.';
+        if (selectedFromEngine.value != null) return 'Select a highlighted destination square.';
+        return 'Select a highlighted piece to move.';
       });
 
       const rcToDark = new Array(64).fill(-1);
@@ -1077,6 +1149,7 @@
         opponent.value = '';
         showGameOver.value = false;
         gameOverWinner.value = null;
+        gameOverReason.value = '';
         currentPlayer.value = 1;
 
         // gomoku lock
@@ -1091,6 +1164,13 @@
         ckBoard.value = new Array(64).fill(0);
         ckChainPos.value = null;
         selectedFromEngine.value = null;
+        ckLastFrom.value = null;
+        ckLastTo.value = null;
+        ckLegalFrom.value = [];
+        ckLegalToMap.value = {};
+        ckMustCapture.value = false;
+        ckInChain.value = false;
+        checkerActionMsg.value = '';
 
         // overlays
         showSideSelect.value = false;
@@ -1113,7 +1193,7 @@
       }[relation] || 'Not friends');
 
       const openProfile = (username = null) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         if (!socket.value || !user.value) return;
         socket.value.emit("profile_get", { username: username || user.value.name });
         };
@@ -1123,7 +1203,7 @@
             };
 
       const refreshFriends = () => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         if (socket.value && user.value) socket.value.emit('friends_get');
       };
 
@@ -1138,7 +1218,7 @@
       };
 
       const searchUser = () => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         const username = (friendSearch.value || '').trim();
         if (!username) {
           friendSearchResult.value = null;
@@ -1149,45 +1229,47 @@
       };
 
       const sendFriendRequest = (username) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         socket.value.emit('friend_request_send', { username });
       };
 
       const replyFriendRequest = (username, accept) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         socket.value.emit('friend_request_reply', { username, accept });
       };
 
       const removeFriend = (username) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         if (!confirm(`Remove ${username} from your friends?`)) return;
         socket.value.emit('friend_remove', { username });
       };
 
       const challengeFriend = (username, game) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         if (!socket.value || !user.value) return;
-        challengeStatus.value = `Sending ${gameLabel(game)} challenge to ${username}...`;
+        resetUIState();
         currentGame.value = game;
         gameMode.value = 'pvp_net';
         showProfile.value = false;
         showFriendsPanel.value = false;
+        challengeStatus.value = `Sending ${gameLabel(game)} challenge to ${username}...`;
         socket.value.emit('challenge_user', { targetUsername: username, game });
       };
 
       const replyChallenge = (accept) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         const invite = incomingChallenge.value;
         if (!socket.value || !invite) return;
         socket.value.emit('challenge_reply', { challengeId: invite.challengeId, accept });
         if (accept) {
+          resetUIState();
           currentGame.value = invite.game;
           gameMode.value = 'pvp_net';
-          currentStep.value = 'game';
           showModeSelect.value = false;
           showSideSelect.value = false;
           showNetPrompt.value = false;
-          challengeStatus.value = `Accepted ${gameLabel(invite.game)} challenge from ${invite.from}.`;
+          challengeStatus.value = `Accepting ${gameLabel(invite.game)} challenge from ${invite.from}...`;
+          netMsg.value = challengeStatus.value;
         } else {
           challengeStatus.value = `Declined challenge from ${invite.from}.`;
         }
@@ -1202,7 +1284,7 @@
       };
 
       const openChat = (username) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         chatPeer.value = username;
         chatOpen.value = true;
         chatMessages.value = [];
@@ -1212,12 +1294,22 @@
       };
 
       const sendChat = () => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         const text = (chatText.value || '').trim();
         if (!text || !chatPeer.value) return;
         socket.value.emit('chat_send', { username: chatPeer.value, text });
         chatText.value = '';
       };
+
+      const resumeAuth = () => {
+        if (!socket.value) return false;
+        const savedToken = token.value || sessionStorage.getItem("token") || "";
+        if (!savedToken) return false;
+        socket.value.auth = { token: savedToken };
+        socket.value.emit('auth_resume', { token: savedToken });
+        return true;
+      };
+
       // ========= Socket =========
       const initSocket = () => {
         if (socket.value) {
@@ -1225,6 +1317,7 @@
           try { socket.value.disconnect(); } catch (e) {}
           socket.value = null;
         }
+        socketAuthed.value = false;
 
         if (typeof io === 'undefined') {
           setAuthMsg('Socket.IO client not loaded. Refresh the page and check your network.', 'error');
@@ -1238,7 +1331,7 @@
         socket.value = s;
 
         s.on('connect', () => { socketConnected.value = true; });
-        s.on('disconnect', () => { socketConnected.value = false; });
+        s.on('disconnect', () => { socketConnected.value = false; socketAuthed.value = false; });
         s.on('connect_error', () => {
           socketConnected.value = false;
           authRequestPending.value = false;
@@ -1320,15 +1413,38 @@
             chatPeer.value = d.peer;
             chatMessages.value = [d.message];
             chatOpen.value = true;
-            socket.value.emit('chat_open', { username: d.peer });
+            if (socketAuthed.value) {
+              socket.value.emit('chat_open', { username: d.peer });
+            } else {
+              resumeAuth();
+            }
           }
         });
         s.on('chat_error', (e) => setFriendMsg(e?.msg || 'Chat failed.', 'error'));
         s.on('error', (e) => {
           const msg = e?.msg || 'Server error.';
+          if (e?.code === 'not_signed_in') {
+            socketAuthed.value = false;
+            if (resumeAuth()) {
+              netMsg.value = 'Restoring account session...';
+              return;
+            }
+            logout();
+            setAuthMsg('Session expired. Please sign in again.', 'error');
+            return;
+          }
           netMsg.value = msg;
           setFriendMsg(msg, 'error');
           challengeStatus.value = msg;
+          if (
+            msg.includes('Challenge') ||
+            msg.includes('Challenger') ||
+            msg.includes('already in a match') ||
+            msg.includes('Opponent')
+          ) {
+            incomingChallenge.value = null;
+            showNetPrompt.value = false;
+          }
         });
 
 
@@ -1336,16 +1452,28 @@
         // Auth
         s.on('auth_ok', (data) => {
           authRequestPending.value = false;
+          socketAuthed.value = true;
           user.value = { name: data.user.username };
           sessionStorage.setItem("token", data.token);
           token.value = data.token;
-          setAuthMsg('Signed in successfully.', 'ok');
-          currentStep.value = 'lobby';
+          if (socket.value) socket.value.auth = { token: data.token };
+          if (currentStep.value === 'login') {
+            setAuthMsg('Signed in successfully.', 'ok');
+            currentStep.value = 'lobby';
+          } else {
+            netMsg.value = '';
+          }
           refreshFriends();
         });
         s.on('force_logout', (e) => { alert(e?.msg || 'This account signed in somewhere else.'); logout(); });
         s.on('auth_error', (e) => {
           authRequestPending.value = false;
+          socketAuthed.value = false;
+          if (e?.expired) {
+            logout();
+            setAuthMsg(e?.msg || 'Session expired. Please sign in again.', 'error');
+            return;
+          }
           setAuthMsg(e?.msg || 'Authentication failed', 'error');
         });
 
@@ -1387,6 +1515,11 @@
               if (challengeStatus.value.includes('match started')) challengeStatus.value = '';
             }, 2500);
           }
+          setTimeout(() => {
+            if (socket.value && currentMatchId.value) {
+              socket.value.emit('request_state', { matchId: currentMatchId.value });
+            }
+          }, 0);
         });
 
         // Authoritative state sync (both games)
@@ -1432,6 +1565,9 @@
 
             ckLegalFrom.value = Array.isArray(data.legalFrom) ? data.legalFrom : [];
             ckLegalToMap.value = (data.legalToMap && typeof data.legalToMap === 'object') ? data.legalToMap : {};
+            ckMustCapture.value = !!data.mustCapture;
+            ckInChain.value = !!data.inChain;
+            checkerActionMsg.value = '';
             // During capture chains, keep the forced piece selected.
             if (ckChainPos.value != null && isMyTurn.value) {
               selectedFromEngine.value = ckChainPos.value;
@@ -1439,7 +1575,9 @@
               // Keep the current selection unless it no longer belongs to the player.
               if (selectedFromEngine.value != null) {
                 const v = ckBoard.value[selectedFromEngine.value] || 0;
-                if (ownerOf(v) !== myPlayer.value) selectedFromEngine.value = null;
+                if (ownerOf(v) !== myPlayer.value || !ckLegalFromSet.value.has(selectedFromEngine.value)) {
+                  selectedFromEngine.value = null;
+                }
               }
             }
           }
@@ -1464,13 +1602,19 @@
                 gomokuLocked.value = false;
             }
 
-            alert(data?.msg || 'Invalid move');
+            const message = data?.msg || 'Invalid move';
+            if (currentGame.value === 'checkers') {
+              checkerActionMsg.value = message;
+              return;
+            }
+            alert(message);
             });
 
         s.on('game_over', (data) => {
             gomokuLocked.value = false;
             pendingEngineMove.value = null;
           gameOverWinner.value = data.winner;
+          gameOverReason.value = data.reason || '';
           showGameOver.value = true;
         });
       };
@@ -1478,6 +1622,24 @@
       const ensureSocket = () => {
         if (!socket.value) initSocket();
         return !!socket.value;
+      };
+      const ensureAuthedSocket = () => {
+        if (!ensureSocket()) return false;
+        if (!token.value && !sessionStorage.getItem("token")) {
+          logout();
+          setAuthMsg('Please sign in again.', 'error');
+          return false;
+        }
+        if (!socketConnected.value) {
+          netMsg.value = 'Reconnecting to server...';
+          return false;
+        }
+        if (!socketAuthed.value) {
+          netMsg.value = 'Restoring account session...';
+          resumeAuth();
+          return false;
+        }
+        return true;
       };
 
       // ========= Auth actions =========
@@ -1527,6 +1689,7 @@
       const logout = () => {
         user.value = null;
         currentStep.value = 'login';
+        socketAuthed.value = false;
 
         authTab.value = 'login';
         setAuthMsg('', '');
@@ -1569,7 +1732,7 @@
 
       const setMode = (mode) => {
         if (mode === 'local') {
-            ensureSocket();
+            if (!ensureAuthedSocket()) return;
             gameMode.value = 'local';
             showModeSelect.value = false;
             resetUIState();
@@ -1600,7 +1763,7 @@
 
       // PvE choose (gomoku: humanSide, checkers: humanPlayer)
       const choosePveRole = (p) => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
 
         resetUIState();
         showSideSelect.value = false;
@@ -1627,7 +1790,7 @@
 
       // Online PvP challenge
       const sendChallenge = () => {
-        ensureSocket();
+        if (!ensureAuthedSocket()) return;
         const t = (targetUsername.value || '').trim();
         if (!t) {
           netMsg.value = 'Please input opponent username';
@@ -1646,7 +1809,7 @@
 
       // ========= Click handlers (send only) =========
       const clickGomoku = (uiIndex) => {
-        if (!socket.value || !socketConnected.value) return;
+        if (!ensureAuthedSocket()) return;
         if (gameMode.value !== 'pve' && gameMode.value !== 'pvp_net' && gameMode.value !== 'local') return;
         // Ignore repeated clicks while locked.
         if (gomokuLocked.value) return;
@@ -1679,17 +1842,25 @@
         });
         };
       const clickCheckers = (uiIndex) => {
-        if (!socket.value || !socketConnected.value) return;
+        if (!ensureAuthedSocket()) return;
         if (gameMode.value !== 'pve' && gameMode.value !== 'pvp_net' && gameMode.value !== 'local') return;
         if (!isMyTurn.value) return;
 
         const e = uiToEngineIndex8(uiIndex);
         const v = ckBoard.value[e] || 0;
+        const ownPiece = v !== 0 && ownerOf(v) === myPlayer.value;
+        const legalSource = ckLegalFromSet.value.has(e);
+        const legalTarget = ckLegalToSet.value.has(e);
+        checkerActionMsg.value = '';
 
         // Capture chain: source is fixed, so clicking a target sends the move.
         if (ckChainPos.value != null) {
           selectedFromEngine.value = ckChainPos.value;
           if (e === selectedFromEngine.value) return;
+          if (!legalTarget) {
+            checkerActionMsg.value = 'You must continue the capture with the highlighted target.';
+            return;
+          }
           socket.value.emit('make_move', {
             matchId: currentMatchId.value,
             game: 'checkers',
@@ -1701,15 +1872,30 @@
 
         // No source selected: clicking your piece selects it.
         if (selectedFromEngine.value == null) {
-          if (v !== 0 && ownerOf(v) === myPlayer.value) {
+          if (ownPiece && legalSource) {
             selectedFromEngine.value = e;
+          } else if (ownPiece) {
+            checkerActionMsg.value = ckMustCapture.value
+              ? 'Capture is mandatory. Select a highlighted piece.'
+              : 'This piece has no legal move right now. Select a highlighted piece.';
           }
           return;
         }
 
         // Source selected: own piece changes selection; other cells are targets.
-        if (v !== 0 && ownerOf(v) === myPlayer.value) {
-          selectedFromEngine.value = e;
+        if (ownPiece) {
+          if (legalSource) {
+            selectedFromEngine.value = e;
+          } else {
+            checkerActionMsg.value = ckMustCapture.value
+              ? 'Capture is mandatory. Select a highlighted piece.'
+              : 'This piece has no legal move right now. Select a highlighted piece.';
+          }
+          return;
+        }
+
+        if (!legalTarget) {
+          checkerActionMsg.value = 'Select a highlighted destination square.';
           return;
         }
 
@@ -1726,6 +1912,7 @@
       const restartGame = () => {
         showGameOver.value = false;
         gameOverWinner.value = null;
+        gameOverReason.value = '';
 
         if (gameMode.value === 'pve') {
           showSideSelect.value = true;
@@ -1736,9 +1923,13 @@
         backToLobby();
       };
 
+      const closeGameOver = () => {
+        showGameOver.value = false;
+      };
+
       const backToLobby = () => {
         // The server cleans up the match on leave_match.
-        if (socket.value && socketConnected.value) {
+        if (socket.value && socketConnected.value && socketAuthed.value) {
           socket.value.emit('leave_match', { matchId: currentMatchId.value });
         }
 
@@ -1747,11 +1938,11 @@
       };
 
       const undoMove = () => {
-        if (socket.value && socketConnected.value) socket.value.emit('request_undo', { matchId: currentMatchId.value });
+        if (ensureAuthedSocket()) socket.value.emit('request_undo', { matchId: currentMatchId.value });
       };
 
       const resign = () => {
-        if (socket.value && socketConnected.value) socket.value.emit('leave_match', { matchId: currentMatchId.value, resign: true });
+        if (socket.value && socketConnected.value && socketAuthed.value) socket.value.emit('leave_match', { matchId: currentMatchId.value, resign: true });
         // Return the UI to the lobby first.
         backToLobby();
       };
@@ -1781,7 +1972,8 @@
 
         // game info
         currentPlayer, myPlayer, opponent, isMyTurn,
-        showGameOver, gameOverWinner, restartGame, backToLobby,
+        playerSideLabel, displayNameForPlayer, displayLabelForPlayer, matchSummary,
+        showGameOver, gameOverWinner, gameOverReason, gameOverMessage, closeGameOver, restartGame, backToLobby,
         undoMove, resign,
 
         // gomoku
@@ -1792,7 +1984,7 @@
         checkersBoard, getCheckerCellClass, clickCheckers,
         isCheckerKing, isCheckerOwner,
         ckChainPosDark,
-        selectedFromUi,
+        selectedFromUi, ckStatusText, checkerActionMsg,
 
         openProfile,
         showProfile,
