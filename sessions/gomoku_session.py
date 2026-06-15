@@ -67,7 +67,7 @@ class GomokuSession(BaseSession):
         self.board.do_move(idx)
 
         
-        self.move_history.append(idx)   # 关键：不记历史就没法撤销
+        self.move_history.append(idx)   # 不记历史就没法撤销
 
         # 通知 AI：对手刚走了 idx（树跟上）
         if self.mode == "pve" and self.ai_agent and hasattr(self.ai_agent, "update_with_move"):
@@ -97,7 +97,7 @@ class GomokuSession(BaseSession):
         if self.ai_agent and hasattr(self.ai_agent, "get_action"):
             idx = int(self.ai_agent.get_action(self.board))
             if idx not in self.board.availables:
-                # AI 出非法步就拒绝并让它重新选（这里简单兜底成第一个合法步）
+                # AI 出非法步就拒绝并让它重新选（兜底成第一个合法步）
                 idx = int(self.board.availables[0])
         else:
             # 兜底：没注入模型就随机
