@@ -2,7 +2,7 @@
 import random
 from sessions.base_session import BaseSession
 
-# 按你的实际路径调整
+
 from games.gomoku_game import Board  # 或：from games.game import Board
 
 
